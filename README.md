@@ -145,11 +145,14 @@ To inspect which feature types exist and whether they will be detected for the c
 
 - **`print_features()`** — prints every `FuncGroup` with a short description and detection status (`on` / `off` / `—` for manual-only types such as **EXCL** and **UNDEF**). Hybrid types show `off (needs …)` when their flag is on but a prerequisite is off.
 - **`is_enabled_for_perception(func)`** — returns `True` or `False` when molecule perception is controlled by a flag; returns `None` for **EXCL** and **UNDEF** (not emitted from molecules). Hybrid prerequisites are applied the same way as in `pharmacophore_from_molecule()`.
+- **`enable(func)`** / **`disable(func)`** / **`set_enabled(func, enabled)`** — turn flags on or off after construction (`func` is a `FuncGroup` or string such as `"LIPO"`). Raises `ValueError` for **EXCL** and **UNDEF**. Boolean fields (`opts.arom`, etc.) remain writable directly.
 
 ```python
 from pypharao import FuncGroup, PerceptionOptions
 
-opts = PerceptionOptions(lipo=False)
+opts = PerceptionOptions()
+opts.disable(FuncGroup.LIPO)
+opts.enable("AROM")
 opts.print_features()
 assert opts.is_enabled_for_perception(FuncGroup.LIPO) is False
 assert opts.is_enabled_for_perception(FuncGroup.EXCL) is None

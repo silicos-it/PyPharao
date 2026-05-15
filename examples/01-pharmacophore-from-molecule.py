@@ -13,9 +13,9 @@ AllChem.UFFOptimizeMolecule(mol)
 
 options = PerceptionOptions()
 
-print("All available features and which one are used:")
+print("Which poharamcophore features are perceived and which ones not:")
 options.print_features()
-print("\nIs the HACC feature used:")
+print("\nIs the HACC feature percepted when present:")
 print(options.is_enabled_for_perception("HACC"))
 
 print("\nPharmacophore search on phenol:")
