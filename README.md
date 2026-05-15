@@ -35,7 +35,7 @@ ref = Pharmacophore.from_json_file("query.json")
 mol = Chem.MolFromMolFile("ligand.sdf", removeHs=False)
 searcher = PharmacophoreSearch(ref)  # default: all query features must match
 # searcher = PharmacophoreSearch(ref, min_matched_query_features=2)  # partial OK
-result = searcher.search_with_molecule(mol)
+result = searcher.screen(mol)
 print(result.tanimoto, result.overlap_volume)
 ```
 
@@ -115,7 +115,7 @@ If RDKit is not installed, `pharmacophore_from_molecule` is `None` on import. Th
 You can also match a reference pharmacophore directly against a molecule:
 
 ```python
-result = PharmacophoreSearch(ref).search_with_molecule(mol, conf_id=0)
+result = PharmacophoreSearch(ref).screen(mol, conf_id=0)
 ```
 
 (`search_with_rdkit_mol` is an alias for backward compatibility.)

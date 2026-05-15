@@ -80,7 +80,7 @@ class PharmacophoreSearch:
 
     When ``ref`` is provided at construction, ``perception_options`` is fixed to the
     molecule feature types required to match that query (see
-    ``perception_options_from_pharmacophore``). ``search_with_molecule`` uses those
+    ``perception_options_from_pharmacophore``). ``screen`` uses those
     flags unless a different reference is passed explicitly.
 
     ``min_matched_query_features`` sets how many query points must appear in the
@@ -287,27 +287,21 @@ class PharmacophoreSearch:
             aligned_mol=None,
         )
 
-    def search_with_molecule(
+    def screen(
         self,
-        mol_or_ref: Any,
-        mol: Any | None = None,
+        mol: Any,
+        *,
         db: Pharmacophore | None = None,
         conf_id: int = 0,
     ) -> MatchResult:
         """Match reference to a molecule, building the database pharmacophore if needed.
 
-        Preferred: ``search_with_molecule(mol)`` when ``ref`` was set on the searcher.
-        Legacy: ``search_with_molecule(ref, mol)``.
+        Requires ``ref`` on the searcher: ``PharmacophoreSearch(ref).screen(mol)``.
         """
-        if mol is not None:
-            ref, mol = mol_or_ref, mol
-        else:
-            ref = self.ref
-            mol = mol_or_ref
+        ref = self.ref
         if ref is None:
             raise ValueError(
-                "Reference pharmacophore required: pass PharmacophoreSearch(ref) "
-                "or search_with_molecule(ref, mol)."
+                "Reference pharmacophore required: pass PharmacophoreSearch(ref)."
             )
         if db is None:
             from .rdkit_perception import pharmacophore_from_molecule
@@ -337,4 +331,4 @@ class PharmacophoreSearch:
             res.aligned_mol = None
         return res
 
-    search_with_rdkit_mol = search_with_molecule
+    search_with_rdkit_mol = screen

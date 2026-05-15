@@ -90,7 +90,7 @@ def run_screening_phase(
     with tqdm(prepared_mols, desc="Pharmacophore search", unit="mol") as pbar:
         for line_idx, smi, mol_3d in pbar:
             try:
-                match = searcher.search_with_molecule(mol_3d)
+                match = searcher.screen(mol_3d)
                 results.append((match.tanimoto, line_idx, smi))
             except Exception:
                 n_search_perceive_fail += 1
@@ -174,7 +174,7 @@ def run_top_hit_diagnostics(
         idx,
         smi,
         mol_3d,
-        searcher.search_with_molecule(mol_3d),
+        searcher.screen(mol_3d),
     )
 
 

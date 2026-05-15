@@ -130,7 +130,7 @@ If RDKit is not installed, `pharmacophore_from_molecule` is `None` on import. Th
 You can also match a reference pharmacophore directly against a molecule:
 
 ```python
-result = PharmacophoreSearch().search_with_molecule(ref, mol, conf_id=0)
+result = PharmacophoreSearch(ref).screen(mol, conf_id=0)
 ```
 
 (`search_with_rdkit_mol` is an alias for backward compatibility.)
