@@ -94,11 +94,12 @@ def run_screening_phase(
     mol_list = [mol_3d for _, _, mol_3d in prepared_mols]
     meta = [(line_idx, smi) for line_idx, smi, _ in prepared_mols]
     try:
-        matches = searcher.screen(mol_list)  # n_jobs=None uses all CPUs
+        hits = searcher.screen(mol_list)  # n_jobs=None uses all CPUs
     except Exception:
         n_search_perceive_fail = len(mol_list)
-        matches = []
-    for (line_idx, smi), match in zip(meta, matches):
+        hits = []
+    for mol_idx, match in hits:
+        line_idx, smi = meta[mol_idx]
         results.append((match.tanimoto, line_idx, smi))
 
     results.sort(reverse=True)
@@ -172,6 +173,9 @@ def run_top_hit_diagnostics(
         return
     score, idx, smi = results[0]
     mol_3d = prepared_by_line[idx][1]
+    match = searcher.screen(mol_3d)
+    if match is None:
+        return
     diagnose_match(
         f"{phase_label} — top hit",
         query_ph,
@@ -179,7 +183,7 @@ def run_top_hit_diagnostics(
         idx,
         smi,
         mol_3d,
-        searcher.screen(mol_3d),
+        match,
     )
 
 

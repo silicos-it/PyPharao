@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import multiprocessing as mp
+import os
+import sys
+from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +21,104 @@ from .volume import volume_overlap
 
 if TYPE_CHECKING:
     pass
+
+
+@dataclass(frozen=True)
+class _ScreenConfig:
+    ref: Pharmacophore
+    epsilon: float
+    use_direction: bool
+    with_exclusion: bool
+    early_exit_score: float
+    min_matched_query_features: int | None
+
+
+def _is_rdkit_mol(obj: Any) -> bool:
+    return callable(getattr(obj, "GetNumAtoms", None))
+
+
+def _is_molecule_batch(mol: Any) -> bool:
+    if isinstance(mol, (str, bytes)):
+        return False
+    if not isinstance(mol, Sequence):
+        return False
+    if len(mol) == 0:
+        return True
+    first = mol[0]
+    if _is_rdkit_mol(first):
+        return True
+    if isinstance(first, tuple) and len(first) >= 2 and _is_rdkit_mol(first[-1]):
+        return True
+    return False
+
+
+def _parse_indexed_molecules(mols: Sequence[Any]) -> list[tuple[int, Any]]:
+    """Normalize batch input to ``(index, Chem.Mol)`` pairs.
+
+    Accepts a list of RDKit molecules (indices 0, 1, …) or tuples whose last
+    element is a molecule, e.g. ``(line_idx, smiles, mol)`` — then ``line_idx``
+    is used as the reported index.
+    """
+    if len(mols) == 0:
+        return []
+    first = mols[0]
+    if _is_rdkit_mol(first):
+        return list(enumerate(mols))
+    if isinstance(first, tuple) and len(first) >= 2 and _is_rdkit_mol(first[-1]):
+        return [(int(item[0]), item[-1]) for item in mols]
+    raise ValueError(
+        "Batch input must be a list of RDKit molecules or tuples ending with a "
+        "molecule, e.g. [(line_idx, smiles, mol), ...]."
+    )
+
+
+def _resolve_n_jobs(n_jobs: int | None) -> int:
+    if n_jobs is None:
+        return os.cpu_count() or 1
+    if n_jobs < 1:
+        raise ValueError("n_jobs must be >= 1")
+    return n_jobs
+
+
+def _process_pool_context() -> mp.context.BaseContext | None:
+    """Use fork on Unix so scripts run as ``python example.py`` need no ``__main__`` guard."""
+    if sys.platform == "win32":
+        return None
+    try:
+        return mp.get_context("fork")
+    except ValueError:
+        return None
+
+
+def _progress_iter(iterable, *, total: int, desc: str):
+    try:
+        from tqdm import tqdm
+    except ImportError as exc:
+        raise ImportError("progress=True requires tqdm (pip install tqdm)") from exc
+    return tqdm(iterable, total=total, desc=desc, unit="mol")
+
+
+def _is_match(result: MatchResult) -> bool:
+    """True when the alignment maps at least one query feature."""
+    return bool(result.mapping)
+
+
+def _screen_mol_worker(
+    args: tuple[_ScreenConfig, int, Any, int],
+) -> tuple[int, MatchResult] | None:
+    config, index, mol, conf_id = args
+    searcher = PharmacophoreSearch(
+        ref=config.ref,
+        epsilon=config.epsilon,
+        use_direction=config.use_direction,
+        with_exclusion=config.with_exclusion,
+        early_exit_score=config.early_exit_score,
+        min_matched_query_features=config.min_matched_query_features,
+    )
+    hit = searcher._screen_single(mol, conf_id=conf_id)
+    if hit is None:
+        return None
+    return index, hit
 
 
 def compute_ref_volume(ref: Pharmacophore, use_direction: bool) -> tuple[float, int]:
@@ -67,7 +170,6 @@ class MatchResult:
     tanimoto: float = 0.0
     tversky_ref: float = 0.0
     tversky_db: float = 0.0
-    solution: SolutionInfo = field(default_factory=SolutionInfo)
     mapping: list[tuple[int, int]] = field(default_factory=list)
     database_pharmacophore: Pharmacophore = field(default_factory=Pharmacophore)
     matched_db_pharmacophore: Pharmacophore = field(default_factory=Pharmacophore)
@@ -128,6 +230,20 @@ class PharmacophoreSearch:
             return self._perception_options
         return perception_options_from_pharmacophore(ref)
 
+    def _screen_config(self) -> _ScreenConfig:
+        if self.ref is None:
+            raise ValueError(
+                "Reference pharmacophore required: pass PharmacophoreSearch(ref)."
+            )
+        return _ScreenConfig(
+            ref=self.ref,
+            epsilon=self.epsilon,
+            use_direction=self.use_direction,
+            with_exclusion=self.with_exclusion,
+            early_exit_score=self.early_exit_score,
+            min_matched_query_features=self.min_matched_query_features,
+        )
+
     def _effective_min_matched_query_features(self, ref: Pharmacophore) -> int:
         n_query = count_query_features(ref)
         if n_query == 0:
@@ -173,7 +289,15 @@ class PharmacophoreSearch:
         Call as ``search(db)`` when ``ref`` was passed to ``PharmacophoreSearch(ref)``,
         or as ``search(ref, db)`` for a one-off reference.
         """
-        ref, db = self._resolve_ref(ref_or_db if db is not None else None, db or ref_or_db)
+        result, _ = self._search_with_alignment(
+            ref_or_db if db is not None else None, db or ref_or_db
+        )
+        return result
+
+    def _search_with_alignment(
+        self, ref_or_db: Pharmacophore | None, db: Pharmacophore
+    ) -> tuple[MatchResult, SolutionInfo]:
+        ref, db = self._resolve_ref(ref_or_db, db)
         use_dir = self.use_direction
         ref_volume, excl_size = compute_ref_volume(ref, use_dir)
         db_volume = compute_db_volume(db, use_dir)
@@ -184,13 +308,15 @@ class PharmacophoreSearch:
         func_map = FunctionMapping(ref, db, self.epsilon)
         f_map = func_map.get_next_map()
         if not f_map or len(f_map) < min_matched:
-            return MatchResult(
-                ref_volume,
-                db_volume,
-                0.0,
-                0.0,
-                solution=SolutionInfo(),
-                database_pharmacophore=db.copy(),
+            return (
+                MatchResult(
+                    ref_volume,
+                    db_volume,
+                    0.0,
+                    0.0,
+                    database_pharmacophore=db.copy(),
+                ),
+                SolutionInfo(),
             )
 
         best = SolutionInfo()
@@ -272,32 +398,61 @@ class PharmacophoreSearch:
             if db_volume > 1e-12:
                 tdb = aligned_vol / db_volume
 
-        return MatchResult(
-            ref_volume=ref_volume,
-            db_volume=db_volume,
-            overlap_volume=overlap_vol,
-            excl_volume=excl_vol,
-            tanimoto=tan,
-            tversky_ref=tref,
-            tversky_db=tdb,
-            solution=best,
-            mapping=best_map,
-            database_pharmacophore=db.copy(),
-            matched_db_pharmacophore=matched,
-            aligned_mol=None,
+        return (
+            MatchResult(
+                ref_volume=ref_volume,
+                db_volume=db_volume,
+                overlap_volume=overlap_vol,
+                excl_volume=excl_vol,
+                tanimoto=tan,
+                tversky_ref=tref,
+                tversky_db=tdb,
+                mapping=best_map,
+                database_pharmacophore=db.copy(),
+                matched_db_pharmacophore=matched,
+                aligned_mol=None,
+            ),
+            best,
         )
 
     def screen(
         self,
         mol: Any,
         *,
+        n_jobs: int | None = None,
+        progress: bool = False,
         db: Pharmacophore | None = None,
         conf_id: int = 0,
-    ) -> MatchResult:
-        """Match reference to a molecule, building the database pharmacophore if needed.
+    ) -> MatchResult | None | list[tuple[int, MatchResult]]:
+        """Match reference to one or more molecules.
 
-        Requires ``ref`` on the searcher: ``PharmacophoreSearch(ref).screen(mol)``.
+        Single molecule: returns a ``MatchResult`` on a hit, else ``None``.
+
+        Batch: returns ``[(index, MatchResult), ...]`` for hits only. Pass a list
+        of RDKit molecules, or tuples such as ``(line_idx, smiles, mol)`` (the
+        first element is used as ``index``). ``n_jobs=None`` (default) uses all
+        available CPUs; ``n_jobs=1`` runs sequentially. Set ``progress=True`` for
+        a tqdm bar over the batch (requires the ``tqdm`` package).
         """
+        if _is_molecule_batch(mol):
+            if db is not None:
+                raise ValueError("db=... is only supported when screening a single molecule.")
+            indexed_mols = _parse_indexed_molecules(mol)
+            return self._screen_batch(
+                indexed_mols,
+                n_jobs=n_jobs,
+                conf_id=conf_id,
+                progress=progress,
+            )
+        return self._screen_single(mol, db=db, conf_id=conf_id)
+
+    def _screen_single(
+        self,
+        mol: Any,
+        *,
+        db: Pharmacophore | None = None,
+        conf_id: int = 0,
+    ) -> MatchResult | None:
         ref = self.ref
         if ref is None:
             raise ValueError(
@@ -309,7 +464,9 @@ class PharmacophoreSearch:
             db = pharmacophore_from_molecule(
                 mol, self._perception_options_for(ref), conf_id=conf_id
             )
-        res = self.search(ref, db)
+        res, alignment = self._search_with_alignment(ref, db)
+        if not _is_match(res):
+            return None
         try:
             from rdkit import Chem
 
@@ -322,13 +479,52 @@ class PharmacophoreSearch:
             for a in range(n):
                 p = conf.GetAtomPosition(a)
                 coords[a, 0], coords[a, 1], coords[a, 2] = p.x, p.y, p.z
-            rot = quat_to_rotation_matrix(res.solution.rotor)
-            new_xyz = position_molecule_coords(coords, rot, res.solution)
+            rot = quat_to_rotation_matrix(alignment.rotor)
+            new_xyz = position_molecule_coords(coords, rot, alignment)
             for a in range(n):
                 conf.SetAtomPosition(a, new_xyz[a].tolist())
             res.aligned_mol = m
         except Exception:
             res.aligned_mol = None
         return res
+
+    def _screen_batch(
+        self,
+        indexed_mols: Sequence[tuple[int, Any]],
+        *,
+        n_jobs: int | None,
+        conf_id: int,
+        progress: bool = False,
+    ) -> list[tuple[int, MatchResult]]:
+        if len(indexed_mols) == 0:
+            return []
+
+        config = self._screen_config()
+        workers = min(_resolve_n_jobs(n_jobs), len(indexed_mols))
+        total = len(indexed_mols)
+        if workers <= 1:
+            hits: list[tuple[int, MatchResult]] = []
+            mols = indexed_mols
+            if progress:
+                mols = _progress_iter(mols, total=total, desc="Screening")
+            for index, mol in mols:
+                hit = self._screen_single(mol, conf_id=conf_id)
+                if hit is not None:
+                    hits.append((index, hit))
+            return hits
+
+        tasks = [(config, index, mol, conf_id) for index, mol in indexed_mols]
+        hits = []
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=_process_pool_context(),
+        ) as executor:
+            results = executor.map(_screen_mol_worker, tasks)
+            if progress:
+                results = _progress_iter(results, total=total, desc="Screening")
+            for item in results:
+                if item is not None:
+                    hits.append(item)
+        return hits
 
     search_with_rdkit_mol = screen

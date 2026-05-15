@@ -4,48 +4,100 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
-from typing import Any, TextIO
+from typing import Any, Literal, TextIO
 
 from .pharmacophore import Pharmacophore
 from .search import MatchResult
+
+SortOrder = Literal["ascending", "descending"]
+SortKey = Literal[
+    "ref_volume",
+    "db_volume",
+    "overlap_volume",
+    "excl_volume",
+    "tanimoto",
+    "tversky_ref",
+    "tversky_db",
+]
+
+_TABLE_HEADERS = [
+    "index",
+    "ref_volume",
+    "db_volume",
+    "overlap_volume",
+    "excl_volume",
+    "tanimoto",
+    "tversky_ref",
+    "tversky_db",
+    "mapping",
+    "database_pharmacophore",
+    "matched_db_pharmacophore",
+    "aligned_mol",
+]
 
 
 def _format_mapping(mapping: Sequence[tuple[int, int]]) -> str:
     if not mapping:
         return "—"
-    return ", ".join(f"({r},{d})" for r, d in mapping)
+    return ",".join(f"({r},{d})" for r, d in mapping)
 
 
 def _pharmacophore_summary(ph: Pharmacophore) -> str:
     if not ph.points:
-        return "0 points"
-    funcs = ", ".join(p.func.value for p in ph.points)
-    return f"{len(ph)} points [{funcs}]"
+        return "[]"
+    funcs = ",".join(p.func.value for p in ph.points)
+    return f"[{funcs}]"
 
 
-def _aligned_mol_label(mol: Any) -> str:
+def _aligned_mol_smiles(mol: Any) -> str:
     if mol is None:
         return "—"
     try:
-        return f"RDKit Mol ({mol.GetNumAtoms()} atoms)"
+        from rdkit import Chem
+
+        return Chem.MolToSmiles(Chem.RemoveHs(mol))
     except Exception:
-        return "present"
+        return "—"
 
 
-def _scalar_rows(result: MatchResult) -> list[tuple[str, str]]:
+def _result_row(index: int, hit: MatchResult) -> list[str]:
     return [
-        ("ref_volume", f"{result.ref_volume:.6f}"),
-        ("db_volume", f"{result.db_volume:.6f}"),
-        ("overlap_volume", f"{result.overlap_volume:.6f}"),
-        ("excl_volume", f"{result.excl_volume:.6f}"),
-        ("tanimoto", f"{result.tanimoto:.6f}"),
-        ("tversky_ref", f"{result.tversky_ref:.6f}"),
-        ("tversky_db", f"{result.tversky_db:.6f}"),
-        ("mapping", _format_mapping(result.mapping)),
-        ("database_pharmacophore", _pharmacophore_summary(result.database_pharmacophore)),
-        ("matched_db_pharmacophore", _pharmacophore_summary(result.matched_db_pharmacophore)),
-        ("aligned_mol", _aligned_mol_label(result.aligned_mol)),
+        str(index),
+        f"{hit.ref_volume:.2f}",
+        f"{hit.db_volume:.2f}",
+        f"{hit.overlap_volume:.2f}",
+        f"{hit.excl_volume:.2f}",
+        f"{hit.tanimoto:.3f}",
+        f"{hit.tversky_ref:.3f}",
+        f"{hit.tversky_db:.3f}",
+        _format_mapping(hit.mapping),
+        _pharmacophore_summary(hit.database_pharmacophore),
+        _pharmacophore_summary(hit.matched_db_pharmacophore),
+        _aligned_mol_smiles(hit.aligned_mol),
     ]
+
+
+def sort_match_results(
+    matches: list[tuple[int, MatchResult]],
+    *,
+    sort: SortOrder = "descending",
+    key: SortKey = "tanimoto",
+) -> list[tuple[int, MatchResult]]:
+    """Sort screen hits by a numeric ``MatchResult`` field.
+
+    ``matches`` is the ``[(index, MatchResult), ...]`` list from
+    ``PharmacophoreSearch.screen()``. Returns a new list; the input is unchanged.
+    """
+    reverse = sort == "descending"
+    return sorted(matches, key=lambda item: getattr(item[1], key), reverse=reverse)
+
+
+def _normalize_hits(
+    results: MatchResult | list[tuple[int, MatchResult]],
+) -> list[tuple[int, MatchResult]]:
+    if isinstance(results, MatchResult):
+        return [(0, results)]
+    return list(results)
 
 
 def _print_table(
@@ -54,74 +106,45 @@ def _print_table(
     *,
     file: TextIO,
 ) -> None:
-    widths = [len(h) for h in headers]
+    print("\t".join(headers), file=file)
     for row in rows:
-        for i, cell in enumerate(row):
-            widths[i] = max(widths[i], len(cell))
-    sep = "  ".join(h.ljust(widths[i]) for i, h in enumerate(headers))
-    print(sep, file=file)
-    print("  ".join("-" * widths[i] for i in range(len(headers))), file=file)
-    for row in rows:
-        print("  ".join(row[i].ljust(widths[i]) for i in range(len(headers))), file=file)
+        print("\t".join(row), file=file)
 
 
 def print_match_results(
     results: MatchResult | list[tuple[int, MatchResult]] | None,
     *,
+    limit: int | None = None,
     file: TextIO | None = None,
 ) -> None:
-    """Print a tabulated summary of one or more screen hits.
+    """Print a tab-separated summary of one or more screen hits.
 
+    The first row lists column headers; each following row is one molecule.
     Accepts a single ``MatchResult``, a batch ``[(index, MatchResult), ...]``
     from ``PharmacophoreSearch.screen()``, or ``None`` when there is no hit.
+
+    When ``limit`` is set, at most that many hit rows are printed (after any
+    sorting applied by the caller).
     """
     out = file if file is not None else sys.stdout
+
+    if limit is not None and limit < 0:
+        raise ValueError("limit must be >= 0")
 
     if results is None:
         print("No match.", file=out)
         return
 
-    if isinstance(results, MatchResult):
-        label_w = max(len(label) for label, _ in _scalar_rows(results))
-        print("MatchResult", file=out)
-        for label, value in _scalar_rows(results):
-            print(f"  {label:<{label_w}}  {value}", file=out)
-        return
-
-    if not results:
+    hits = _normalize_hits(results)
+    if not hits:
         print("No hits.", file=out)
         return
 
-    headers = [
-        "index",
-        "tanimoto",
-        "tversky_ref",
-        "tversky_db",
-        "overlap_volume",
-        "excl_volume",
-        "ref_volume",
-        "db_volume",
-        "n_pairs",
-        "db_points",
-        "matched_points",
-        "aligned_mol",
-    ]
-    rows: list[list[str]] = []
-    for index, hit in results:
-        rows.append(
-            [
-                str(index),
-                f"{hit.tanimoto:.6f}",
-                f"{hit.tversky_ref:.6f}",
-                f"{hit.tversky_db:.6f}",
-                f"{hit.overlap_volume:.6f}",
-                f"{hit.excl_volume:.6f}",
-                f"{hit.ref_volume:.6f}",
-                f"{hit.db_volume:.6f}",
-                str(len(hit.mapping)),
-                str(len(hit.database_pharmacophore)),
-                str(len(hit.matched_db_pharmacophore)),
-                _aligned_mol_label(hit.aligned_mol),
-            ]
-        )
-    _print_table(headers, rows, file=out)
+    if limit is not None:
+        total = len(hits)
+        hits = hits[:limit]
+        if total > limit:
+            print(f"Showing {limit} of {total} hits.", file=out)
+
+    rows = [_result_row(index, hit) for index, hit in hits]
+    _print_table(_TABLE_HEADERS, rows, file=out)

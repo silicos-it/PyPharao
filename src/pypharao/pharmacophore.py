@@ -31,8 +31,8 @@ FUNC_DESCRIPTIONS: dict[FuncGroup, str] = {
     FuncGroup.LIPO: "Lipophilic regions (from molecular surface)",
     FuncGroup.POSC: "Positively charged atoms",
     FuncGroup.NEGC: "Negatively charged atoms",
-    FuncGroup.HYBH: "Hybrid H-bond features (merged donor/acceptor pairs)",
-    FuncGroup.HYBL: "Hybrid lipophilic/aromatic features (merged arom/lipo sites)",
+    FuncGroup.HYBH: "Hybrid H-bond features (added for nearby donor/acceptor pairs)",
+    FuncGroup.HYBL: "Hybrid lipophilic/aromatic features (added for overlapping arom/lipo sites)",
     FuncGroup.EXCL: "Exclusion sphere (query only; penalizes overlap in search)",
     FuncGroup.UNDEF: "Undefined placeholder (manual pharmacophores only)",
 }

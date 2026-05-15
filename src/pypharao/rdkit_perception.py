@@ -29,6 +29,14 @@ def _pt(mol: Chem.Mol, conf_id: int, idx: int) -> tuple[float, float, float]:
     return (p.x, p.y, p.z)
 
 
+def _num_heavy_neighbors(atom: Chem.Atom) -> int:
+    """Count non-hydrogen neighbors (``GetNumHeavyNeighbors`` removed in RDKit 2026)."""
+    getter = getattr(atom, "GetNumHeavyNeighbors", None)
+    if getter is not None:
+        return getter()
+    return sum(1 for nbr in atom.GetNeighbors() if nbr.GetAtomicNum() != 1)
+
+
 def _arom_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
     out: list[PharmacophorePoint] = []
     ri = mol.GetRingInfo()
@@ -299,7 +307,7 @@ def _lipo_label_atoms(mol: Chem.Mol) -> list[float]:
                 if b.GetBondType() == Chem.BondType.DOUBLE:
                     scores[idx] = 0.0
                     _lipo_label_neighbors(scores, mol, idx, 0.6)
-            if a.GetTotalDegree() - a.GetNumHeavyNeighbors() > 2:
+            if a.GetTotalDegree() - _num_heavy_neighbors(a) > 2:
                 scores[idx] = 0.0
                 for b in a.GetBonds():
                     oi = b.GetOtherAtomIdx(idx)
@@ -403,129 +411,79 @@ def _hybrid_same_l(c1: PharmacophorePoint, c2: PharmacophorePoint) -> bool:
 
 
 def _hybrid_calc(points: list[PharmacophorePoint], do_hybh: bool, do_hybl: bool) -> None:
+    """Append HYBL/HYBH for overlapping pairs; keep original AROM/LIPO and HDON/HACC."""
+    hybrids: list[PharmacophorePoint] = []
     if do_hybl:
-        i = 0
-        while i < len(points):
-            p = points[i]
-            if p.func == FuncGroup.AROM:
-                j = i + 1
-                while j < len(points):
-                    p2 = points[j]
-                    if p2.func == FuncGroup.LIPO and _hybrid_same_l(p2, p):
-                        cx = (p.x + p2.x) / 2.0
-                        cy = (p.y + p2.y) / 2.0
-                        cz = (p.z + p2.z) / 2.0
-                        points[i] = PharmacophorePoint(
-                            cx,
-                            cy,
-                            cz,
-                            FuncGroup.HYBL,
-                            FUNC_SIGMA[FuncGroup.HYBL],
-                            False,
-                            0.0,
-                            0.0,
-                            0.0,
-                        )
-                        del points[j]
-                        continue
-                    j += 1
-            elif p.func == FuncGroup.LIPO:
-                j = i + 1
-                while j < len(points):
-                    p2 = points[j]
-                    if p2.func == FuncGroup.AROM and _hybrid_same_l(p, p2):
-                        cx = (p.x + p2.x) / 2.0
-                        cy = (p.y + p2.y) / 2.0
-                        cz = (p.z + p2.z) / 2.0
-                        points[i] = PharmacophorePoint(
-                            cx,
-                            cy,
-                            cz,
-                            FuncGroup.HYBL,
-                            FUNC_SIGMA[FuncGroup.HYBL],
-                            False,
-                            0.0,
-                            0.0,
-                            0.0,
-                        )
-                        del points[j]
-                        continue
-                    j += 1
-            i += 1
-    if do_hybh:
-        i = 0
-        while i < len(points):
-            p = points[i]
-            if p.func == FuncGroup.HACC:
-                j = i + 1
-                while j < len(points):
-                    p2 = points[j]
-                    if p2.func == FuncGroup.HDON and _hybrid_same_h(p2, p):
-                        v1 = (p.nx - p.x, p.ny - p.y, p.nz - p.z)
-                        v2 = (p2.nx - p2.x, p2.ny - p2.y, p2.nz - p2.z)
-                        mx = (v1[0] + v2[0]) / 2.0
-                        my = (v1[1] + v2[1]) / 2.0
-                        mz = (v1[2] + v2[2]) / 2.0
-                        ln = math.sqrt(mx * mx + my * my + mz * mz)
-                        if ln > 1e-12:
-                            mx, my, mz = mx / ln, my / ln, mz / ln
-                        points[i] = PharmacophorePoint(
-                            p.x,
-                            p.y,
-                            p.z,
-                            FuncGroup.HYBH,
-                            FUNC_SIGMA[FuncGroup.HYBH],
-                            True,
-                            p.x + mx,
-                            p.y + my,
-                            p.z + mz,
-                        )
-                        del points[j]
-                        continue
-                    j += 1
-            elif p.func == FuncGroup.HDON:
-                j = i + 1
-                while j < len(points):
-                    p2 = points[j]
-                    if p2.func == FuncGroup.HACC and _hybrid_same_h(p, p2):
-                        v1 = (p.nx - p.x, p.ny - p.y, p.nz - p.z)
-                        v2 = (p2.nx - p2.x, p2.ny - p2.y, p2.nz - p2.z)
-                        mx = (v1[0] + v2[0]) / 2.0
-                        my = (v1[1] + v2[1]) / 2.0
-                        mz = (v1[2] + v2[2]) / 2.0
-                        ln = math.sqrt(mx * mx + my * my + mz * mz)
-                        if ln > 1e-12:
-                            mx, my, mz = mx / ln, my / ln, mz / ln
-                        points[i] = PharmacophorePoint(
-                            p.x,
-                            p.y,
-                            p.z,
-                            FuncGroup.HYBH,
-                            FUNC_SIGMA[FuncGroup.HYBH],
-                            True,
-                            p.x + mx,
-                            p.y + my,
-                            p.z + mz,
-                        )
-                        del points[j]
-                        continue
-                    j += 1
-            i += 1
-    if do_hybl:
+        paired: set[int] = set()
         for i in range(len(points)):
+            if i in paired:
+                continue
             p = points[i]
-            if p.func in (FuncGroup.AROM, FuncGroup.LIPO):
-                points[i] = PharmacophorePoint(
-                    p.x,
-                    p.y,
-                    p.z,
-                    FuncGroup.HYBL,
-                    FUNC_SIGMA[FuncGroup.HYBL],
-                    False,
-                    0.0,
-                    0.0,
-                    0.0,
+            if p.func not in (FuncGroup.AROM, FuncGroup.LIPO):
+                continue
+            partner = FuncGroup.LIPO if p.func == FuncGroup.AROM else FuncGroup.AROM
+            for j in range(i + 1, len(points)):
+                if j in paired:
+                    continue
+                p2 = points[j]
+                if p2.func != partner or not _hybrid_same_l(p, p2):
+                    continue
+                hybrids.append(
+                    PharmacophorePoint(
+                        (p.x + p2.x) / 2.0,
+                        (p.y + p2.y) / 2.0,
+                        (p.z + p2.z) / 2.0,
+                        FuncGroup.HYBL,
+                        FUNC_SIGMA[FuncGroup.HYBL],
+                        False,
+                        0.0,
+                        0.0,
+                        0.0,
+                    )
                 )
+                paired.add(i)
+                paired.add(j)
+                break
+    if do_hybh:
+        paired = set()
+        for i in range(len(points)):
+            if i in paired:
+                continue
+            p = points[i]
+            if p.func not in (FuncGroup.HACC, FuncGroup.HDON):
+                continue
+            partner = FuncGroup.HDON if p.func == FuncGroup.HACC else FuncGroup.HACC
+            for j in range(i + 1, len(points)):
+                if j in paired:
+                    continue
+                p2 = points[j]
+                if p2.func != partner or not _hybrid_same_h(p, p2):
+                    continue
+                v1 = (p.nx - p.x, p.ny - p.y, p.nz - p.z)
+                v2 = (p2.nx - p2.x, p2.ny - p2.y, p2.nz - p2.z)
+                mx = (v1[0] + v2[0]) / 2.0
+                my = (v1[1] + v2[1]) / 2.0
+                mz = (v1[2] + v2[2]) / 2.0
+                ln = math.sqrt(mx * mx + my * my + mz * mz)
+                if ln > 1e-12:
+                    mx, my, mz = mx / ln, my / ln, mz / ln
+                hybrids.append(
+                    PharmacophorePoint(
+                        p.x,
+                        p.y,
+                        p.z,
+                        FuncGroup.HYBH,
+                        FUNC_SIGMA[FuncGroup.HYBH],
+                        True,
+                        p.x + mx,
+                        p.y + my,
+                        p.z + mz,
+                    )
+                )
+                paired.add(i)
+                paired.add(j)
+                break
+    points.extend(hybrids)
 
 
 def pharmacophore_from_molecule(

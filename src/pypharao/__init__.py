@@ -1,6 +1,6 @@
 """PyPharao: pharmacophore model and Pharao-style 3D Gaussian matching."""
 
-from .alignment import Alignment, SolutionInfo, position_molecule_coords, position_pharmacophore
+from .alignment import Alignment, position_molecule_coords, position_pharmacophore
 from .pharmacophore import (
     FUNC_HAS_NORMAL,
     FUNC_SIGMA,
@@ -12,6 +12,7 @@ from .pharmacophore import (
     distance,
 )
 from .quaternion_math import quat_to_rotation_matrix
+from .match_report import print_match_results, sort_match_results
 from .search import MatchResult, PharmacophoreSearch, count_query_features
 from .volume import volume_overlap
 
@@ -32,13 +33,14 @@ __all__ = [
     "FUNC_SIGMA",
     "FuncGroup",
     "MatchResult",
+    "print_match_results",
+    "sort_match_results",
     "PerceptionOptions",
     "perception_options_from_pharmacophore",
     "Pharmacophore",
     "PharmacophorePoint",
     "PharmacophoreSearch",
     "count_query_features",
-    "SolutionInfo",
     "cosine_normals",
     "default_alpha",
     "distance",

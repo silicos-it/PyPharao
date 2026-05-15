@@ -1,7 +1,7 @@
 import numpy as np
 
-from pypharao import Alignment, FuncGroup, Pharmacophore, PharmacophorePoint, SolutionInfo
-from pypharao.alignment import position_molecule_coords
+from pypharao import Alignment, FuncGroup, Pharmacophore, PharmacophorePoint
+from pypharao.alignment import SolutionInfo, position_molecule_coords
 from pypharao.quaternion_math import quat_to_rotation_matrix
 
 

@@ -43,5 +43,20 @@ def test_pharmacophore_from_phenol_hybh_with_explicit_hs():
     assert FuncGroup.HYBH in funcs
 
 
+def test_hybrid_features_keep_original_sites():
+    mol = Chem.MolFromSmiles("c1ccccc1O")
+    mol = Chem.AddHs(mol)
+    assert AllChem.EmbedMolecule(mol, randomSeed=0xF00D) == 0
+    p = pharmacophore_from_molecule(mol, PerceptionOptions(), conf_id=0)
+    funcs = {pt.func for pt in p.points}
+    assert FuncGroup.HDON in funcs
+    assert FuncGroup.HACC in funcs
+    assert FuncGroup.AROM in funcs
+    if FuncGroup.HYBH in funcs:
+        assert FuncGroup.HDON in funcs and FuncGroup.HACC in funcs
+    if FuncGroup.HYBL in funcs:
+        assert FuncGroup.AROM in funcs and FuncGroup.LIPO in funcs
+
+
 def test_pharmacophore_from_rdkit_alias():
     assert pharmacophore_from_rdkit is pharmacophore_from_molecule
