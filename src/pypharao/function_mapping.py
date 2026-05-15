@@ -7,20 +7,39 @@ import math
 from .constants import GCI, GCI2, PI
 from .pharmacophore import FuncGroup, Pharmacophore, distance
 
+# Database types matchable by hybrid query features (OR semantics).
+_HYBL_DB = frozenset({FuncGroup.AROM, FuncGroup.LIPO, FuncGroup.HYBL})
+_HYBH_DB = frozenset({FuncGroup.HDON, FuncGroup.HACC, FuncGroup.HYBH})
 
-def _compatible(ref: FuncGroup, db: FuncGroup) -> bool:
+
+def database_types_for_query(ref: FuncGroup) -> frozenset[FuncGroup]:
+    """Molecule feature types that may satisfy a query point of type ``ref``."""
+    if ref in (FuncGroup.EXCL, FuncGroup.UNDEF):
+        return frozenset()
+    if ref == FuncGroup.HYBL:
+        return _HYBL_DB
+    if ref == FuncGroup.HYBH:
+        return _HYBH_DB
+    return frozenset({ref})
+
+
+def functions_compatible(ref: FuncGroup, db: FuncGroup) -> bool:
+    """Return whether a reference (query) feature may map to a database feature.
+
+    Matching is directional: ``ref`` is the pharmacophore query, ``db`` is the
+    molecule/database feature. Only the pairings below are allowed; there are no
+    other cross-type matches (e.g. query AROM does not match database HYBL).
+
+    * AROM, LIPO, HDON, HACC, POSC, NEGC — same type only
+    * HYBL — database AROM, LIPO, or HYBL
+    * HYBH — database HDON, HACC, or HYBH
+    """
     if ref == db:
         return True
-    if ref == FuncGroup.HYBH and db in (FuncGroup.HDON, FuncGroup.HACC):
-        return True
-    if ref in (FuncGroup.HDON, FuncGroup.HACC) and db == FuncGroup.HYBH:
-        return True
-    if ref == FuncGroup.HYBL and db in (FuncGroup.AROM, FuncGroup.LIPO):
-        return True
-    if ref == FuncGroup.AROM and db == FuncGroup.HYBL:
-        return True
-    if ref == FuncGroup.LIPO and db == FuncGroup.HYBL:
-        return True
+    if ref == FuncGroup.HYBL:
+        return db in _HYBL_DB
+    if ref == FuncGroup.HYBH:
+        return db in _HYBH_DB
     return False
 
 
@@ -39,7 +58,7 @@ class FunctionMapping:
             if ref[i].func == FuncGroup.EXCL:
                 continue
             for j in range(len(db)):
-                if _compatible(ref[i].func, db[j].func):
+                if functions_compatible(ref[i].func, db[j].func):
                     self._ref_index.append(i)
                     self._db_index.append(j)
 

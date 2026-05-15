@@ -269,8 +269,8 @@ class Alignment:
 
                     if (
                         use_direction
-                        and rf == FuncGroup.AROM
-                        and df == FuncGroup.AROM
+                        and rf in (FuncGroup.AROM, FuncGroup.HYBL)
+                        and df in (FuncGroup.AROM, FuncGroup.HYBL)
                         and hn1
                         and hn2
                     ):
@@ -291,7 +291,7 @@ class Alignment:
                     elif (
                         use_direction
                         and rf in (FuncGroup.HACC, FuncGroup.HDON, FuncGroup.HYBH)
-                        and df in (FuncGroup.HYBH, FuncGroup.HACC, FuncGroup.HDON)
+                        and df in (FuncGroup.HDON, FuncGroup.HACC, FuncGroup.HYBH)
                         and hn1
                         and hn2
                     ):

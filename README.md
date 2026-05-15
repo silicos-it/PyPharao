@@ -7,8 +7,10 @@ Python library for **3D pharmacophore** representation and **Gaussian volume ali
 **pip** (NumPy only for core geometry; install the `rdkit` extra for `pharmacophore_from_molecule`):
 
 ```bash
-pip install -e ".[dev,rdkit]"
+pip install -e ".[dev,rdkit,examples]"
 ```
+
+(`examples` pulls in **tqdm** for progress bars in `examples/`. To add it later: `pip install tqdm` or `pip install -e ".[examples]"`.)
 
 Use a Conda **conda-forge** environment if `pip install rdkit` is unavailable on your platform:
 
@@ -31,8 +33,9 @@ from pypharao import Pharmacophore, PharmacophoreSearch, pharmacophore_from_mole
 
 ref = Pharmacophore.from_json_file("query.json")
 mol = Chem.MolFromMolFile("ligand.sdf", removeHs=False)
-db = pharmacophore_from_molecule(mol, PerceptionOptions(), conf_id=0)
-result = PharmacophoreSearch().search(ref, db)
+searcher = PharmacophoreSearch(ref)  # default: all query features must match
+# searcher = PharmacophoreSearch(ref, min_matched_query_features=2)  # partial OK
+result = searcher.search_with_molecule(mol)
 print(result.tanimoto, result.overlap_volume)
 ```
 
@@ -112,7 +115,7 @@ If RDKit is not installed, `pharmacophore_from_molecule` is `None` on import. Th
 You can also match a reference pharmacophore directly against a molecule:
 
 ```python
-result = PharmacophoreSearch().search_with_molecule(ref, mol, conf_id=0)
+result = PharmacophoreSearch(ref).search_with_molecule(mol, conf_id=0)
 ```
 
 (`search_with_rdkit_mol` is an alias for backward compatibility.)
@@ -158,7 +161,11 @@ assert opts.is_enabled_for_perception(FuncGroup.LIPO) is False
 assert opts.is_enabled_for_perception(FuncGroup.EXCL) is None
 ```
 
-`PerceptionOptions` does **not** affect manual pharmacophores, JSON/`.phar` loading, or search/alignment — only molecule perception. It does not tune Gaussian widths (`alpha`), distances, or perception thresholds beyond on/off per feature class. It is not used by `PharmacophoreSearch` itself; you pass the resulting `Pharmacophore` into search separately.
+`PerceptionOptions` does **not** affect manual pharmacophores, JSON/`.phar` loading, or search/alignment — only molecule perception. It does not tune Gaussian widths (`alpha`), distances, or perception thresholds beyond on/off per feature class.
+
+When you use `PharmacophoreSearch(ref)`, database molecules are perceived with flags derived automatically from the feature types in `ref` (`perception_options_from_pharmacophore`). For example, a query with **AROM** and **HYBH** only enables `arom`, `hdon`, `hacc`, and `hybh` on ligands—not `lipo` or `hybl`, which avoids spurious **HYBL** sites on aliphatic rings matching query **AROM**.
+
+By default, a hit must map **every** matchable query point (all types except **EXCL** and **UNDEF**). Pass `min_matched_query_features` at construction to allow partial matches, or set it explicitly to `count_query_features(ref)` for the same strict behaviour.
 
 ```python
 from pypharao import PerceptionOptions, pharmacophore_from_molecule
@@ -172,6 +179,68 @@ opts = PerceptionOptions(
 )
 ph = pharmacophore_from_molecule(mol, opts, conf_id=0)
 ```
+
+## 4. Pharmacophores and PharmacophorePoints
+
+A **`Pharmacophore`** is a named collection of features (`points`). A **`PharmacophorePoint`** is one Gaussian pharmacophore site: coordinates `(x, y, z)`, feature type (`func`), width (`alpha`), and optional normal tip `(nx, ny, nz)` when `has_normal` is true (Pharao convention: normal tip in absolute ångström, not a unit vector by itself).
+
+### `PharmacophorePoint` (immutable)
+
+Points are immutable value objects. To change coordinates, type, or width, build a new point and assign it into the pharmacophore:
+
+```python
+from pypharao import FuncGroup, PharmacophorePoint, default_alpha
+
+p = PharmacophorePoint(0.0, 0.0, 0.0, FuncGroup.LIPO, default_alpha(FuncGroup.LIPO), False)
+
+# Update selected fields; func is unchanged
+p2 = p.with_fields(x=1.0, y=2.0, z=3.0, alpha=0.8)
+
+# Or construct a new point explicitly (e.g. change feature type)
+p3 = PharmacophorePoint(
+    p.x, p.y, p.z,
+    FuncGroup.AROM,
+    default_alpha(FuncGroup.AROM),
+    True,
+    p.nx, p.ny, p.nz,
+)
+```
+
+### `Pharmacophore` (mutable)
+
+You can edit a pharmacophore after it is built (manually, from JSON/`.phar`, or from a molecule):
+
+```python
+from pypharao import Pharmacophore, PharmacophorePoint, FuncGroup, default_alpha
+
+ph = Pharmacophore(name="query", points=[...])
+
+ph.name = "renamed_query"
+ph.append_point(PharmacophorePoint(1, 2, 3, FuncGroup.HACC, default_alpha(FuncGroup.HACC), True, 1, 2, 4))
+ph.remove_at(0)
+ph.clear()
+
+len(ph)
+p0 = ph[0]
+for pt in ph:
+    ...
+
+ph.points[0] = ph.points[0].with_fields(x=1.0)
+copy = ph.copy()
+```
+
+| Method / attribute | Purpose |
+|--------------------|---------|
+| `name` | Query or ligand label (read/write) |
+| `points` | List of `PharmacophorePoint` (mutable list) |
+| `append_point(p)` | Append a feature |
+| `remove_at(i)` | Remove feature by index |
+| `clear()` | Remove all features |
+| `copy()` | Shallow copy (same point objects) |
+| `to_json` / `write_json` | Serialize current state |
+| `to_phar_text` / `write_phar` | Write Pharao `.phar` format |
+
+`PerceptionOptions` only applies when **creating** a pharmacophore from a molecule. To change which features are perceived, call `pharmacophore_from_molecule()` again with new options; you cannot “re-perceive” an existing `Pharmacophore` in place.
 
 ## License
 

@@ -12,10 +12,10 @@ from .pharmacophore import (
     distance,
 )
 from .quaternion_math import quat_to_rotation_matrix
-from .search import MatchResult, PharmacophoreSearch
+from .search import MatchResult, PharmacophoreSearch, count_query_features
 from .volume import volume_overlap
 
-from .perception_options import PerceptionOptions
+from .perception_options import PerceptionOptions, perception_options_from_pharmacophore
 
 try:
     from .rdkit_perception import (
@@ -33,9 +33,11 @@ __all__ = [
     "FuncGroup",
     "MatchResult",
     "PerceptionOptions",
+    "perception_options_from_pharmacophore",
     "Pharmacophore",
     "PharmacophorePoint",
     "PharmacophoreSearch",
+    "count_query_features",
     "SolutionInfo",
     "cosine_normals",
     "default_alpha",

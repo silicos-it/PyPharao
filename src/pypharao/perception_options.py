@@ -5,7 +5,8 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from .pharmacophore import FUNC_DESCRIPTIONS, FuncGroup
+from .function_mapping import database_types_for_query
+from .pharmacophore import FUNC_DESCRIPTIONS, FuncGroup, Pharmacophore
 
 _PERCEPTION_FLAG: dict[FuncGroup, str | None] = {
     FuncGroup.AROM: "arom",
@@ -119,3 +120,34 @@ class PerceptionOptions:
             for name in ("arom", "hdon", "hacc", "lipo", "posc", "negc", "hybh", "hybl")
         )
         return f"PerceptionOptions({flags})"
+
+
+def perception_options_from_pharmacophore(ph: Pharmacophore) -> PerceptionOptions:
+    """Build perception flags for matching a reference pharmacophore.
+
+    Enables every molecule feature type that can map to at least one query point
+    (see ``database_types_for_query`` / ``functions_compatible``). ``EXCL`` and
+    ``UNDEF`` query points are ignored. An empty pharmacophore returns all flags on.
+    """
+    needed: set[FuncGroup] = set()
+    for p in ph.points:
+        needed |= database_types_for_query(p.func)
+    if not needed:
+        return PerceptionOptions()
+
+    opts = PerceptionOptions(
+        arom=False,
+        hdon=False,
+        hacc=False,
+        lipo=False,
+        posc=False,
+        negc=False,
+        hybh=False,
+        hybl=False,
+    )
+    for func in needed:
+        field = _PERCEPTION_FLAG.get(func)
+        if field is not None:
+            setattr(opts, field, True)
+
+    return opts
