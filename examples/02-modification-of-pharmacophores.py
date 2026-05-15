@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build a pharmacophore from a molecule and screen a compound library."""
 
+import sys
 from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -20,18 +21,21 @@ from pypharao import (
 # PART I - Create a pharmacophore from phenol
 # -------------------------------------------
 
+# Create phenol and generate 3D structure
 mol = Chem.MolFromSmiles("c1ccccc1O")
 mol = Chem.AddHs(mol)
 AllChem.EmbedMolecule(mol, randomSeed=0xF00D)
 AllChem.UFFOptimizeMolecule(mol)
 
-options = PerceptionOptions()
-
+# Give a list of all potential pharmacophore features
+pharmacophore_features = PerceptionOptions()
 print("Which pharmacophore features are percepted and which ones not:")
 options.print_features()
 print("\nIs the HACC feature percepted when present:")
 print(options.is_enabled_for_perception("HACC"))
 
+# Create a pharmacophore from phenol.
+# Allow all features from the pharmacophore_features instance
 ph = pharmacophore_from_molecule(
     mol,
     options,
@@ -39,6 +43,7 @@ ph = pharmacophore_from_molecule(
     name="pharmacophore_from_phenol",
 )
 
+sys.exit()
 
 # ----------------------------------------------------------
 # PART II - Screen a compound library in two separate phases
@@ -47,7 +52,6 @@ ph = pharmacophore_from_molecule(
 SMI_FILE = Path(__file__).resolve().parent / "datasets" / "compounds_10k.smi"
 MAX_COMPOUNDS = None  # None: entire file; set e.g. 100 for a quick trial run
 RUN_MATCH_DIAGNOSTICS = True  # print mapping/volumes for the top hit per phase
-
 
 def build_3d_mol(smiles: str, seed: int) -> Chem.Mol | None:
     """Parse SMILES, add hydrogens, embed, and minimize. Returns None on failure."""
