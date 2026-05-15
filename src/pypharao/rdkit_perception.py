@@ -67,6 +67,13 @@ def _arom_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
     return out
 
 
+def _has_donor_hydrogen(atom: Chem.Atom) -> bool:
+    """True when N/O bears at least one H (implicit count or explicit H neighbor)."""
+    if atom.GetTotalNumHs() > 0:
+        return True
+    return any(n.GetAtomicNum() == 1 for n in atom.GetNeighbors())
+
+
 def _h_donor_normal(mol: Chem.Mol, conf_id: int, idx: int) -> tuple[float, float, float]:
     ax, ay, az = _pt(mol, conf_id, idx)
     sx, sy, sz = 0.0, 0.0, 0.0
@@ -545,7 +552,7 @@ def pharmacophore_from_molecule(
                 continue
             if a.GetFormalCharge() < 0:
                 continue
-            if a.GetTotalNumHs() == 0:
+            if not _has_donor_hydrogen(a):
                 continue
             idx = a.GetIdx()
             nx, ny, nz = _h_donor_normal(mol, conf_id, idx)

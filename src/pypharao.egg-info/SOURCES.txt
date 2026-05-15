@@ -19,6 +19,7 @@ src/pypharao.egg-info/requires.txt
 src/pypharao.egg-info/top_level.txt
 tests/test_alignment_smoke.py
 tests/test_function_mapping.py
+tests/test_phar_golden.py
 tests/test_pharmacophore_json.py
 tests/test_rdkit_perception.py
 tests/test_search.py

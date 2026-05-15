@@ -141,6 +141,20 @@ All flags default to `True`, so `PerceptionOptions()` enables the full Pharao-st
 
 Turning off `hdon` also disables hybrid H-bond perception, even if `hybh` is still `True`. The same applies to `hybl` when `arom` or `lipo` is off.
 
+To inspect which feature types exist and whether they will be detected for the current flags:
+
+- **`print_features()`** — prints every `FuncGroup` with a short description and detection status (`on` / `off` / `—` for manual-only types such as **EXCL** and **UNDEF**). Hybrid types show `off (needs …)` when their flag is on but a prerequisite is off.
+- **`is_enabled_for_perception(func)`** — returns `True` or `False` when molecule perception is controlled by a flag; returns `None` for **EXCL** and **UNDEF** (not emitted from molecules). Hybrid prerequisites are applied the same way as in `pharmacophore_from_molecule()`.
+
+```python
+from pypharao import FuncGroup, PerceptionOptions
+
+opts = PerceptionOptions(lipo=False)
+opts.print_features()
+assert opts.is_enabled_for_perception(FuncGroup.LIPO) is False
+assert opts.is_enabled_for_perception(FuncGroup.EXCL) is None
+```
+
 `PerceptionOptions` does **not** affect manual pharmacophores, JSON/`.phar` loading, or search/alignment — only molecule perception. It does not tune Gaussian widths (`alpha`), distances, or perception thresholds beyond on/off per feature class. It is not used by `PharmacophoreSearch` itself; you pass the resulting `Pharmacophore` into search separately.
 
 ```python
