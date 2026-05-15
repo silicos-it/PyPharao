@@ -180,19 +180,19 @@ class PharmacophoreSearch:
             aligned_mol=None,
         )
 
-    def search_with_rdkit_mol(
+    def search_with_molecule(
         self,
         ref: Pharmacophore,
         mol: Any,
         db: Pharmacophore | None = None,
         conf_id: int = 0,
     ) -> MatchResult:
-        """Match `ref` to `db` pharmacophore, or compute `db` from an RDKit molecule."""
+        """Match `ref` to `db` pharmacophore, or compute `db` from a 3D molecule (RDKit ``Chem.Mol``)."""
         if db is None:
             from .perception_options import PerceptionOptions
-            from .rdkit_perception import pharmacophore_from_rdkit
+            from .rdkit_perception import pharmacophore_from_molecule
 
-            db = pharmacophore_from_rdkit(mol, PerceptionOptions(), conf_id=conf_id)
+            db = pharmacophore_from_molecule(mol, PerceptionOptions(), conf_id=conf_id)
         res = self.search(ref, db)
         try:
             from rdkit import Chem
@@ -214,3 +214,5 @@ class PharmacophoreSearch:
         except Exception:
             res.aligned_mol = None
         return res
+
+    search_with_rdkit_mol = search_with_molecule

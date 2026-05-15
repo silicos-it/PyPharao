@@ -521,12 +521,13 @@ def _hybrid_calc(points: list[PharmacophorePoint], do_hybh: bool, do_hybl: bool)
                 )
 
 
-def pharmacophore_from_rdkit(
+def pharmacophore_from_molecule(
     mol: Chem.Mol,
     options: PerceptionOptions | None = None,
     conf_id: int = 0,
     name: str = "",
 ) -> Pharmacophore:
+    """Build a pharmacophore from a 3D molecule (RDKit ``Chem.Mol`` with conformers)."""
     if mol.GetNumConformers() == 0:
         raise ValueError("RDKit molecule must have at least one conformer with 3D coordinates")
     opts = options or PerceptionOptions()
@@ -630,3 +631,6 @@ def pharmacophore_from_rdkit(
         _hybrid_calc(pts, do_hybh, do_hybl)
     nm = name or (mol.GetProp("_Name") if mol.HasProp("_Name") else "")
     return Pharmacophore(name=nm, points=pts)
+
+
+pharmacophore_from_rdkit = pharmacophore_from_molecule

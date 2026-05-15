@@ -18,8 +18,12 @@ from .volume import volume_overlap
 from .perception_options import PerceptionOptions
 
 try:
-    from .rdkit_perception import pharmacophore_from_rdkit
+    from .rdkit_perception import (
+        pharmacophore_from_molecule,
+        pharmacophore_from_rdkit,
+    )
 except ImportError:
+    pharmacophore_from_molecule = None  # type: ignore[misc, assignment]
     pharmacophore_from_rdkit = None  # type: ignore[misc, assignment]
 
 __all__ = [
@@ -36,6 +40,7 @@ __all__ = [
     "cosine_normals",
     "default_alpha",
     "distance",
+    "pharmacophore_from_molecule",
     "pharmacophore_from_rdkit",
     "position_molecule_coords",
     "position_pharmacophore",
