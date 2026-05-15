@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pypharao"
+version = "0.1.0"
+description = "Pharmacophore representation and Pharao-equivalent 3D Gaussian matching with RDKit"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "LGPL-3.0-or-later"
+authors = [{ name = "Silicos-it and contributors" }]
+dependencies = [
+    "numpy>=1.22",
+]
+
+[project.optional-dependencies]
+rdkit = [
+    "rdkit>=2022.9.1",
+]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/silicos-it/PyPharao"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pypharao = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

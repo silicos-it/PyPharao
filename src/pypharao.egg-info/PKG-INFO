@@ -1,0 +1,61 @@
+Metadata-Version: 2.4
+Name: pypharao
+Version: 0.1.0
+Summary: Pharmacophore representation and Pharao-equivalent 3D Gaussian matching with RDKit
+Author: Silicos-it and contributors
+License: LGPL-3.0-or-later
+Project-URL: Homepage, https://github.com/silicos-it/PyPharao
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy>=1.22
+Provides-Extra: rdkit
+Requires-Dist: rdkit>=2022.9.1; extra == "rdkit"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Dynamic: license-file
+
+# PyPharao
+
+Python library for **3D pharmacophore** representation and **Gaussian volume alignment** matching the [Pharao](https://github.com/silicos-it/pharao) C++ implementation, with optional **RDKit** perception from 3D molecules.
+
+## Install
+
+**pip** (NumPy only for core geometry; RDKit required for `pharmacophore_from_rdkit`):
+
+```bash
+pip install -e ".[dev,rdkit]"
+```
+
+Use a Conda **conda-forge** environment if `pip install rdkit` is unavailable on your platform:
+
+```bash
+conda install -c conda-forge rdkit numpy
+pip install -e .
+```
+
+**conda-build** (local recipe under `conda-recipe/`):
+
+```bash
+conda build conda-recipe
+```
+
+## Usage sketch
+
+```python
+from rdkit import Chem
+from pypharao import Pharmacophore, PharmacophoreSearch, pharmacophore_from_rdkit, PerceptionOptions
+
+ref = Pharmacophore.from_json_file("query.json")
+mol = Chem.MolFromMolFile("ligand.sdf", removeHs=False)
+db = pharmacophore_from_rdkit(mol, PerceptionOptions(), conf_id=0)
+result = PharmacophoreSearch().search(ref, db)
+print(result.tanimoto, result.overlap_volume)
+```
+
+Pharmacophore JSON stores feature centers in Å; `nx, ny, nz` are the **absolute coordinates** of the normal tip (same convention as Pharao `.phar` files).
+
+## License
+
+LGPL-3.0-or-later (see `LICENSE`).

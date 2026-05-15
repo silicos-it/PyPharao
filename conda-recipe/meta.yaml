@@ -1,0 +1,34 @@
+{% set name = "pypharao" %}
+{% set version = "0.1.0" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  noarch: python
+  script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools >=61
+  run:
+    - python >=3.10
+    - numpy >=1.22
+    - rdkit >=2022.09
+
+test:
+  imports:
+    - pypharao
+  requires:
+    - pip
+
+about:
+  home: https://github.com/silicos-it/PyPharao
+  license: LGPL-3.0-or-later
+  summary: Pharmacophore 3D matching (Pharao-equivalent) with RDKit integration
