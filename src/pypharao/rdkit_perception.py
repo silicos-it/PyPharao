@@ -1,8 +1,9 @@
-"""Build pharmacophore from RDKit 3D molecule (Pharao `calcPharm` + FuncCalc)."""
+"""Build a pharmacophore from an RDKit 3D molecule (Pharao `calcPharm` + FuncCalc)."""
 
 from __future__ import annotations
 
 import math
+from typing import Any
 
 from rdkit import Chem
 
@@ -15,13 +16,24 @@ from .constants import (
     REF_LIPO,
     round_ob,
 )
-from .perception_options import PerceptionOptions
+from .perception import (
+    MoleculePharmacophorePerception,
+    PharmacophorePerception,
+    QueryPharmacophorePerception,
+)
 from .pharmacophore import (
-    FUNC_SIGMA,
-    FuncGroup,
+    DEFAULT_SIGMA,
+    MoleculePharmacophore,
     Pharmacophore,
     PharmacophorePoint,
+    PointType,
+    QueryPharmacophore,
 )
+
+
+# Two HACC and HDON sites are considered co-located and merged into a single
+# HACC&HDON point when their squared distance is below this threshold.
+_HACC_HDON_MERGE_DIST_SQ = 0.0001
 
 
 def _pt(mol: Chem.Mol, conf_id: int, idx: int) -> tuple[float, float, float]:
@@ -49,7 +61,6 @@ def _arom_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
         cx = sum(c[0] for c in coords) / len(coords)
         cy = sum(c[1] for c in coords) / len(coords)
         cz = sum(c[2] for c in coords) / len(coords)
-        # Plane normal via cross of two ring chords
         ax, ay, az = coords[0][0] - cx, coords[0][1] - cy, coords[0][2] - cz
         bx, by, bz = coords[1][0] - cx, coords[1][1] - cy, coords[1][2] - cz
         nxv = ay * bz - az * by
@@ -61,49 +72,19 @@ def _arom_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
         nxv, nyv, nzv = nxv / ln, nyv / ln, nzv / ln
         out.append(
             PharmacophorePoint(
-                cx,
-                cy,
-                cz,
-                FuncGroup.AROM,
-                FUNC_SIGMA[FuncGroup.AROM],
-                True,
-                cx + nxv,
-                cy + nyv,
-                cz + nzv,
+                type=PointType.AROM,
+                center=(cx, cy, cz),
+                sigma=DEFAULT_SIGMA[PointType.AROM],
+                normal=(cx + nxv, cy + nyv, cz + nzv),
             )
         )
     return out
 
 
 def _has_donor_hydrogen(atom: Chem.Atom) -> bool:
-    """True when N/O bears at least one H (implicit count or explicit H neighbor)."""
     if atom.GetTotalNumHs() > 0:
         return True
     return any(n.GetAtomicNum() == 1 for n in atom.GetNeighbors())
-
-
-def _h_donor_normal(mol: Chem.Mol, conf_id: int, idx: int) -> tuple[float, float, float]:
-    ax, ay, az = _pt(mol, conf_id, idx)
-    sx, sy, sz = 0.0, 0.0, 0.0
-    nbr_bonds = 0
-    for b in mol.GetAtomWithIdx(idx).GetBonds():
-        oi = b.GetOtherAtomIdx(idx)
-        if mol.GetAtomWithIdx(oi).GetAtomicNum() == 1:
-            continue
-        nbr_bonds += 1
-        bx, by, bz = _pt(mol, conf_id, oi)
-        sx += bx - ax
-        sy += by - ay
-        sz += bz - az
-    ln = math.sqrt(sx * sx + sy * sy + sz * sz)
-    if ln < 1e-12:
-        return ax, ay, az
-    sx, sy, sz = -sx / ln, -sy / ln, -sz / ln
-    return ax + sx, ay + sy, az + sz
-
-
-def _h_acc_normal(mol: Chem.Mol, conf_id: int, idx: int) -> tuple[float, float, float]:
-    return _h_donor_normal(mol, conf_id, idx)
 
 
 def _h_acc_delocalized(mol: Chem.Mol, idx: int) -> bool:
@@ -173,7 +154,6 @@ def _sphere_points(center: tuple[float, float, float], radius: float) -> list[tu
 def _h_acc_neighbors(mol: Chem.Mol, conf_id: int, idx: int) -> list[int]:
     a = mol.GetAtomWithIdx(idx)
     ax, ay, az = _pt(mol, conf_id, idx)
-    r_a = _vdw(a.GetAtomicNum())
     out: list[int] = []
     for j in range(mol.GetNumAtoms()):
         if j == idx:
@@ -190,7 +170,6 @@ def _h_acc_neighbors(mol: Chem.Mol, conf_id: int, idx: int) -> list[int]:
 
 
 def _h_acc_surface_fraction(mol: Chem.Mol, conf_id: int, idx: int) -> float:
-    atom = mol.GetAtomWithIdx(idx)
     ax, ay, az = _pt(mol, conf_id, idx)
     sphere = _sphere_points((ax, ay, az), H_BOND_DIST)
     nbrs = _h_acc_neighbors(mol, conf_id, idx)
@@ -351,15 +330,9 @@ def _lipo_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
             cz /= lipo_sum
             out.append(
                 PharmacophorePoint(
-                    cx,
-                    cy,
-                    cz,
-                    FuncGroup.LIPO,
-                    FUNC_SIGMA[FuncGroup.LIPO],
-                    False,
-                    0.0,
-                    0.0,
-                    0.0,
+                    type=PointType.LIPO,
+                    center=(cx, cy, cz),
+                    sigma=DEFAULT_SIGMA[PointType.LIPO],
                 )
             )
     for idx in list(atom_set):
@@ -386,124 +359,61 @@ def _lipo_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
                 cz /= lipo_sum
                 out.append(
                     PharmacophorePoint(
-                        cx,
-                        cy,
-                        cz,
-                        FuncGroup.LIPO,
-                        FUNC_SIGMA[FuncGroup.LIPO],
-                        False,
-                        0.0,
-                        0.0,
-                        0.0,
+                        type=PointType.LIPO,
+                        center=(cx, cy, cz),
+                        sigma=DEFAULT_SIGMA[PointType.LIPO],
                     )
                 )
     return out
 
 
-def _hybrid_same_h(c1: PharmacophorePoint, c2: PharmacophorePoint) -> bool:
-    d = (c1.x - c2.x) ** 2 + (c1.y - c2.y) ** 2 + (c1.z - c2.z) ** 2
-    return d < 0.0001
+def _merge_hacc_hdon(points: list[PharmacophorePoint]) -> list[PharmacophorePoint]:
+    """Collapse co-located HACC + HDON sites into a single HACC&HDON point.
 
-
-def _hybrid_same_l(c1: PharmacophorePoint, c2: PharmacophorePoint) -> bool:
-    d = (c1.x - c2.x) ** 2 + (c1.y - c2.y) ** 2 + (c1.z - c2.z) ** 2
-    return d < 1.0
-
-
-def _hybrid_calc(points: list[PharmacophorePoint], do_hybh: bool, do_hybl: bool) -> None:
-    """Append HYBL/HYBH for overlapping pairs; keep original AROM/LIPO and HDON/HACC."""
-    hybrids: list[PharmacophorePoint] = []
-    if do_hybl:
-        paired: set[int] = set()
-        for i in range(len(points)):
-            if i in paired:
+    Iterates over pairs; whenever a donor and acceptor sit at the same atom
+    (squared distance below :data:`_HACC_HDON_MERGE_DIST_SQ`) both are removed
+    and replaced with one ``HACC&HDON`` point at that location.
+    """
+    used: set[int] = set()
+    out: list[PharmacophorePoint] = []
+    for i, p in enumerate(points):
+        if i in used:
+            continue
+        if p.type not in (PointType.HACC, PointType.HDON):
+            continue
+        partner_type = PointType.HDON if p.type == PointType.HACC else PointType.HACC
+        for j in range(i + 1, len(points)):
+            if j in used:
                 continue
-            p = points[i]
-            if p.func not in (FuncGroup.AROM, FuncGroup.LIPO):
+            q = points[j]
+            if q.type != partner_type:
                 continue
-            partner = FuncGroup.LIPO if p.func == FuncGroup.AROM else FuncGroup.AROM
-            for j in range(i + 1, len(points)):
-                if j in paired:
-                    continue
-                p2 = points[j]
-                if p2.func != partner or not _hybrid_same_l(p, p2):
-                    continue
-                hybrids.append(
-                    PharmacophorePoint(
-                        (p.x + p2.x) / 2.0,
-                        (p.y + p2.y) / 2.0,
-                        (p.z + p2.z) / 2.0,
-                        FuncGroup.HYBL,
-                        FUNC_SIGMA[FuncGroup.HYBL],
-                        False,
-                        0.0,
-                        0.0,
-                        0.0,
-                    )
+            d2 = (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2
+            if d2 > _HACC_HDON_MERGE_DIST_SQ:
+                continue
+            out.append(
+                PharmacophorePoint(
+                    type=PointType.HACC_AND_HDON,
+                    center=(p.x, p.y, p.z),
+                    sigma=DEFAULT_SIGMA[PointType.HACC_AND_HDON],
                 )
-                paired.add(i)
-                paired.add(j)
-                break
-    if do_hybh:
-        paired = set()
-        for i in range(len(points)):
-            if i in paired:
-                continue
-            p = points[i]
-            if p.func not in (FuncGroup.HACC, FuncGroup.HDON):
-                continue
-            partner = FuncGroup.HDON if p.func == FuncGroup.HACC else FuncGroup.HACC
-            for j in range(i + 1, len(points)):
-                if j in paired:
-                    continue
-                p2 = points[j]
-                if p2.func != partner or not _hybrid_same_h(p, p2):
-                    continue
-                v1 = (p.nx - p.x, p.ny - p.y, p.nz - p.z)
-                v2 = (p2.nx - p2.x, p2.ny - p2.y, p2.nz - p2.z)
-                mx = (v1[0] + v2[0]) / 2.0
-                my = (v1[1] + v2[1]) / 2.0
-                mz = (v1[2] + v2[2]) / 2.0
-                ln = math.sqrt(mx * mx + my * my + mz * mz)
-                if ln > 1e-12:
-                    mx, my, mz = mx / ln, my / ln, mz / ln
-                hybrids.append(
-                    PharmacophorePoint(
-                        p.x,
-                        p.y,
-                        p.z,
-                        FuncGroup.HYBH,
-                        FUNC_SIGMA[FuncGroup.HYBH],
-                        True,
-                        p.x + mx,
-                        p.y + my,
-                        p.z + mz,
-                    )
-                )
-                paired.add(i)
-                paired.add(j)
-                break
-    points.extend(hybrids)
+            )
+            used.add(i)
+            used.add(j)
+            break
+    kept = [p for k, p in enumerate(points) if k not in used]
+    return kept + out
 
 
-def pharmacophore_from_molecule(
+def _perceive_points(
     mol: Chem.Mol,
-    options: PerceptionOptions | None = None,
-    conf_id: int = 0,
-    name: str = "",
-) -> Pharmacophore:
-    """Build a pharmacophore from a 3D molecule (RDKit ``Chem.Mol`` with conformers)."""
-    if mol.GetNumConformers() == 0:
-        raise ValueError("RDKit molecule must have at least one conformer with 3D coordinates")
-    opts = options or PerceptionOptions()
-    if opts.hybl and opts.arom and opts.lipo:
-        pass
-    if opts.hybh and opts.hdon and opts.hacc:
-        pass
+    perception: PharmacophorePerception,
+    conf_id: int,
+) -> list[PharmacophorePoint]:
     pts: list[PharmacophorePoint] = []
-    if opts.arom:
+    if perception.is_enabled(PointType.AROM):
         pts.extend(_arom_points(mol, conf_id))
-    if opts.hdon:
+    if perception.is_enabled(PointType.HDON):
         for a in mol.GetAtoms():
             z = a.GetAtomicNum()
             if z not in (7, 8):
@@ -513,22 +423,15 @@ def pharmacophore_from_molecule(
             if not _has_donor_hydrogen(a):
                 continue
             idx = a.GetIdx()
-            nx, ny, nz = _h_donor_normal(mol, conf_id, idx)
             x, y, z = _pt(mol, conf_id, idx)
             pts.append(
                 PharmacophorePoint(
-                    x,
-                    y,
-                    z,
-                    FuncGroup.HDON,
-                    FUNC_SIGMA[FuncGroup.HDON],
-                    True,
-                    nx,
-                    ny,
-                    nz,
+                    type=PointType.HDON,
+                    center=(x, y, z),
+                    sigma=DEFAULT_SIGMA[PointType.HDON],
                 )
             )
-    if opts.hacc:
+    if perception.is_enabled(PointType.HACC):
         for a in mol.GetAtoms():
             z = a.GetAtomicNum()
             if z not in (7, 8):
@@ -540,62 +443,99 @@ def pharmacophore_from_molecule(
                 continue
             if _h_acc_surface_fraction(mol, conf_id, idx) < 0.02:
                 continue
-            nx, ny, nz = _h_acc_normal(mol, conf_id, idx)
             x, y, z = _pt(mol, conf_id, idx)
             pts.append(
                 PharmacophorePoint(
-                    x,
-                    y,
-                    z,
-                    FuncGroup.HACC,
-                    FUNC_SIGMA[FuncGroup.HACC],
-                    True,
-                    nx,
-                    ny,
-                    nz,
+                    type=PointType.HACC,
+                    center=(x, y, z),
+                    sigma=DEFAULT_SIGMA[PointType.HACC],
                 )
             )
-    if opts.lipo:
+    if perception.is_enabled(PointType.LIPO):
         pts.extend(_lipo_points(mol, conf_id))
-    if opts.posc or opts.negc:
+    posc = perception.is_enabled(PointType.POSC)
+    negc = perception.is_enabled(PointType.NEGC)
+    if posc or negc:
         for a in mol.GetAtoms():
             ch = a.GetFormalCharge()
-            if ch < 0 and opts.negc:
+            if ch < 0 and negc:
                 x, y, z = _pt(mol, conf_id, a.GetIdx())
                 pts.append(
                     PharmacophorePoint(
-                        x,
-                        y,
-                        z,
-                        FuncGroup.NEGC,
-                        FUNC_SIGMA[FuncGroup.NEGC],
-                        False,
-                        0.0,
-                        0.0,
-                        0.0,
+                        type=PointType.NEGC,
+                        center=(x, y, z),
+                        sigma=DEFAULT_SIGMA[PointType.NEGC],
                     )
                 )
-            elif ch > 0 and opts.posc:
+            elif ch > 0 and posc:
                 x, y, z = _pt(mol, conf_id, a.GetIdx())
                 pts.append(
                     PharmacophorePoint(
-                        x,
-                        y,
-                        z,
-                        FuncGroup.POSC,
-                        FUNC_SIGMA[FuncGroup.POSC],
-                        False,
-                        0.0,
-                        0.0,
-                        0.0,
+                        type=PointType.POSC,
+                        center=(x, y, z),
+                        sigma=DEFAULT_SIGMA[PointType.POSC],
                     )
                 )
-    do_hybh = opts.hybh and opts.hdon and opts.hacc
-    do_hybl = opts.hybl and opts.arom and opts.lipo
-    if do_hybh or do_hybl:
-        _hybrid_calc(pts, do_hybh, do_hybl)
+    if perception.is_enabled(PointType.HACC_AND_HDON):
+        pts = _merge_hacc_hdon(pts)
+    return pts
+
+
+def _require_conformer(mol: Any) -> None:
+    if mol.GetNumConformers() == 0:
+        raise ValueError(
+            "RDKit molecule must have at least one conformer with 3D coordinates"
+        )
+
+
+def query_pharmacophore_from_molecule(
+    mol: Chem.Mol,
+    perception: QueryPharmacophorePerception | None = None,
+    *,
+    conf_id: int = 0,
+    name: str = "",
+) -> QueryPharmacophore:
+    """Build a :class:`QueryPharmacophore` from a 3D RDKit molecule.
+
+    The user typically refines the result manually (e.g. converting an ``AROM``
+    point to ``AROM|LIPO`` or an ``HDON``/``HACC`` pair to ``HACC|HDON``); the
+    auto-perception emits only the seven elementary plus ``HACC&HDON`` types.
+    """
+    _require_conformer(mol)
+    perception = perception or QueryPharmacophorePerception()
+    pts = _perceive_points(mol, perception, conf_id)
     nm = name or (mol.GetProp("_Name") if mol.HasProp("_Name") else "")
-    return Pharmacophore(name=nm, points=pts)
+    ph = QueryPharmacophore(name=nm)
+    for p in pts:
+        ph.add_point(p)
+    return ph
 
 
-pharmacophore_from_rdkit = pharmacophore_from_molecule
+def query_pharmacophore_from_protein(*args: Any, **kwargs: Any) -> QueryPharmacophore:
+    """Derive a :class:`QueryPharmacophore` from a protein structure.
+
+    Not implemented yet.
+    """
+    raise NotImplementedError(
+        "query_pharmacophore_from_protein is not implemented yet."
+    )
+
+
+def molecule_pharmacophore_from_molecule(
+    mol: Chem.Mol,
+    perception: MoleculePharmacophorePerception | None = None,
+    *,
+    conf_id: int = 0,
+) -> MoleculePharmacophore:
+    """Build a :class:`MoleculePharmacophore` from a 3D RDKit molecule.
+
+    Used internally by :class:`pypharao.PharmacophoreSearch` once per database
+    molecule (and once per conformer).
+    """
+    _require_conformer(mol)
+    perception = perception or MoleculePharmacophorePerception()
+    pts = _perceive_points(mol, perception, conf_id)
+    ph = MoleculePharmacophore()
+    for p in pts:
+        ph.add_point(p)
+    return ph

@@ -1,4 +1,16 @@
-"""High-level pharmacophore search (`main.cpp` alignment branch)."""
+"""High-level pharmacophore search (`main.cpp` alignment branch).
+
+Workflow
+--------
+
+1. Build a :class:`QueryPharmacophore` (manual, from JSON/`.phar`, or via
+   :func:`pypharao.query_pharmacophore_from_molecule`).
+2. Construct ``PharmacophoreSearch(query, perception=...)``. ``perception`` is
+   an optional :class:`MoleculePharmacophorePerception` controlling how database
+   molecules are perceived; defaults to "all seven molecule types enabled".
+3. Call :meth:`PharmacophoreSearch.screen` with a single molecule or a batch.
+   It always returns ``list[tuple[int, MatchResult]]`` (possibly empty).
+"""
 
 from __future__ import annotations
 
@@ -8,29 +20,57 @@ import sys
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any, Literal
 
 import numpy as np
 
 from .alignment import Alignment, SolutionInfo, position_molecule_coords, position_pharmacophore
-from .perception_options import PerceptionOptions, perception_options_from_pharmacophore
-from .pharmacophore import FuncGroup, Pharmacophore, PharmacophorePoint
+from .function_mapping import FunctionMapping
+from .perception import MoleculePharmacophorePerception
+from .pharmacophore import (
+    MoleculePharmacophore,
+    Pharmacophore,
+    PharmacophorePoint,
+    PointType,
+    QueryPharmacophore,
+)
 from .quaternion_math import quat_to_rotation_matrix
-from .function_mapping import FunctionMapping, functions_compatible
 from .volume import volume_overlap
 
-if TYPE_CHECKING:
-    pass
+Metric = Literal["tanimoto", "overlap_volume", "excl_volume", "tversky_ref", "tversky_db"]
+KeepMode = Literal["best", "all"]
+Conformations = Literal["all", "single"] | int
+
+_METRICS: tuple[str, ...] = (
+    "tanimoto",
+    "overlap_volume",
+    "excl_volume",
+    "tversky_ref",
+    "tversky_db",
+)
+_MINIMISE_METRICS: frozenset[str] = frozenset({"excl_volume"})
 
 
-@dataclass(frozen=True)
-class _ScreenConfig:
-    ref: Pharmacophore
-    epsilon: float
-    use_direction: bool
-    with_exclusion: bool
-    early_exit_score: float
-    min_matched_query_features: int | None
+@dataclass
+class MatchResult:
+    """A single (query, molecule-conformer) match.
+
+    ``conf_id`` records which conformer of the input molecule produced this
+    match (always ``0`` when the molecule has a single conformer).
+    """
+
+    ref_volume: float
+    db_volume: float
+    overlap_volume: float
+    excl_volume: float
+    tanimoto: float = 0.0
+    tversky_ref: float = 0.0
+    tversky_db: float = 0.0
+    mapping: list[tuple[int, int]] = field(default_factory=list)
+    database_pharmacophore: Pharmacophore = field(default_factory=MoleculePharmacophore)
+    matched_db_pharmacophore: Pharmacophore = field(default_factory=MoleculePharmacophore)
+    aligned_mol: Any | None = None
+    conf_id: int = 0
 
 
 def _is_rdkit_mol(obj: Any) -> bool:
@@ -39,6 +79,8 @@ def _is_rdkit_mol(obj: Any) -> bool:
 
 def _is_molecule_batch(mol: Any) -> bool:
     if isinstance(mol, (str, bytes)):
+        return False
+    if _is_rdkit_mol(mol):
         return False
     if not isinstance(mol, Sequence):
         return False
@@ -53,11 +95,11 @@ def _is_molecule_batch(mol: Any) -> bool:
 
 
 def _parse_indexed_molecules(mols: Sequence[Any]) -> list[tuple[int, Any]]:
-    """Normalize batch input to ``(index, Chem.Mol)`` pairs.
+    """Normalise batch input to ``(index, Chem.Mol)`` pairs.
 
-    Accepts a list of RDKit molecules (indices 0, 1, …) or tuples whose last
-    element is a molecule, e.g. ``(line_idx, smiles, mol)`` — then ``line_idx``
-    is used as the reported index.
+    Accepts a list of RDKit molecules (indices ``0, 1, …``) or tuples whose
+    last element is a molecule, e.g. ``(line_idx, smiles, mol)`` — in that
+    case ``line_idx`` is used as the reported index.
     """
     if len(mols) == 0:
         return []
@@ -72,11 +114,11 @@ def _parse_indexed_molecules(mols: Sequence[Any]) -> list[tuple[int, Any]]:
     )
 
 
-def _resolve_n_jobs(n_jobs: int | None) -> int:
-    if n_jobs is None:
+def _resolve_n_jobs(n_jobs: int) -> int:
+    if n_jobs < 0:
+        raise ValueError("n_jobs must be >= 0")
+    if n_jobs == 0:
         return os.cpu_count() or 1
-    if n_jobs < 1:
-        raise ValueError("n_jobs must be >= 1")
     return n_jobs
 
 
@@ -98,38 +140,46 @@ def _progress_iter(iterable, *, total: int, desc: str):
     return tqdm(iterable, total=total, desc=desc, unit="mol")
 
 
-def _is_match(result: MatchResult) -> bool:
-    """True when the alignment maps at least one query feature."""
-    return bool(result.mapping)
-
-
-def _screen_mol_worker(
-    args: tuple[_ScreenConfig, int, Any, int],
-) -> tuple[int, MatchResult] | None:
-    config, index, mol, conf_id = args
-    searcher = PharmacophoreSearch(
-        ref=config.ref,
-        epsilon=config.epsilon,
-        use_direction=config.use_direction,
-        with_exclusion=config.with_exclusion,
-        early_exit_score=config.early_exit_score,
-        min_matched_query_features=config.min_matched_query_features,
+def _resolve_conformations(mol: Any, conformations: Conformations) -> list[int]:
+    n_conf = mol.GetNumConformers()
+    if n_conf == 0:
+        raise ValueError(
+            "RDKit molecule must have at least one conformer with 3D coordinates"
+        )
+    all_ids = [c.GetId() for c in mol.GetConformers()]
+    if conformations == "all":
+        return all_ids
+    if conformations == "single":
+        return [all_ids[0]]
+    if isinstance(conformations, int):
+        if conformations <= 0:
+            raise ValueError("conformations must be 'all', 'single', or a positive int")
+        return all_ids[:conformations]
+    raise ValueError(
+        f"Unknown conformations value: {conformations!r}. "
+        "Use 'all', 'single', or a positive int."
     )
-    hit = searcher._screen_single(mol, conf_id=conf_id)
-    if hit is None:
-        return None
-    return index, hit
+
+
+def count_matchable_query_points(query: Pharmacophore) -> int:
+    """Number of query points that can map to a molecule feature (excludes ``EXCL``)."""
+    return sum(1 for p in query if p.type != PointType.EXCL)
+
+
+def matched_query_features(query: Pharmacophore, mapping: list[tuple[int, int]]) -> int:
+    """How many query points appear in a ref→db mapping (EXCL pairs excluded)."""
+    return sum(1 for ri, _ in mapping if query[ri].type != PointType.EXCL)
 
 
 def compute_ref_volume(ref: Pharmacophore, use_direction: bool) -> tuple[float, int]:
-    """Returns (ref_volume, excl_count) per Pharao main.cpp reference block."""
+    """Returns ``(ref_volume, excl_count)`` per Pharao ``main.cpp`` reference block."""
     ref_volume = 0.0
     excl_size = 0
     for i in range(len(ref)):
-        if ref[i].func == FuncGroup.EXCL:
+        if ref[i].type == PointType.EXCL:
             excl_size += 1
             for j in range(len(ref)):
-                if ref[j].func != FuncGroup.EXCL:
+                if ref[j].type != PointType.EXCL:
                     ref_volume -= volume_overlap(ref[i], ref[j], use_direction)
         else:
             ref_volume += volume_overlap(ref[i], ref[i], use_direction)
@@ -139,175 +189,136 @@ def compute_ref_volume(ref: Pharmacophore, use_direction: bool) -> tuple[float, 
 def compute_db_volume(db: Pharmacophore, use_direction: bool) -> float:
     v = 0.0
     for i in range(len(db)):
-        if db[i].func == FuncGroup.EXCL:
+        if db[i].type == PointType.EXCL:
             continue
         v += volume_overlap(db[i], db[i], use_direction)
     return v
 
 
-def _pair_counts_for_overlap(ref: PharmacophorePoint, db: PharmacophorePoint) -> bool:
-    return functions_compatible(ref.func, db.func)
+def _validate_metric(metric: str) -> None:
+    if metric not in _METRICS:
+        raise ValueError(
+            f"Unknown metric {metric!r}. Expected one of: {', '.join(_METRICS)}"
+        )
 
 
-def count_query_features(ref: Pharmacophore) -> int:
-    """Number of reference points that must be matchable (excludes EXCL and UNDEF)."""
-    return sum(
-        1 for p in ref.points if p.func not in (FuncGroup.EXCL, FuncGroup.UNDEF)
+def _score_for_metric(result: MatchResult, metric: str) -> float:
+    return float(getattr(result, metric))
+
+
+def _is_better(candidate: MatchResult, current: MatchResult | None, metric: str) -> bool:
+    if current is None:
+        return True
+    cand = _score_for_metric(candidate, metric)
+    cur = _score_for_metric(current, metric)
+    return cand < cur if metric in _MINIMISE_METRICS else cand > cur
+
+
+@dataclass(frozen=True)
+class _ScreenConfig:
+    query: QueryPharmacophore
+    perception: MoleculePharmacophorePerception
+    epsilon: float
+    use_direction: bool
+    with_exclusion: bool
+    early_exit_score: float
+    conformations: Conformations
+    min_matches: int
+    keep: KeepMode
+    metric: str
+
+
+def _build_aligned_mol(mol: Any, conf_id: int, alignment: SolutionInfo) -> Any | None:
+    """Return a copy of ``mol`` with conformer ``conf_id`` rotated/translated into the query frame."""
+    try:
+        from rdkit import Chem
+    except ImportError:
+        return None
+    if mol.GetNumConformers() == 0:
+        return None
+    try:
+        m = Chem.Mol(mol)
+        conf = m.GetConformer(conf_id)
+        n = m.GetNumAtoms()
+        coords = np.zeros((n, 3), dtype=float)
+        for a in range(n):
+            p = conf.GetAtomPosition(a)
+            coords[a, 0], coords[a, 1], coords[a, 2] = p.x, p.y, p.z
+        rot = quat_to_rotation_matrix(alignment.rotor)
+        new_xyz = position_molecule_coords(coords, rot, alignment)
+        for a in range(n):
+            conf.SetAtomPosition(a, new_xyz[a].tolist())
+        # Drop every other conformer so the returned molecule reflects the aligned pose only.
+        keep_id = conf.GetId()
+        for c in list(m.GetConformers()):
+            if c.GetId() != keep_id:
+                m.RemoveConformer(c.GetId())
+        return m
+    except Exception:
+        return None
+
+
+def _worker(args: tuple[_ScreenConfig, int, Any]) -> list[tuple[int, MatchResult]]:
+    config, index, mol = args
+    searcher = PharmacophoreSearch(
+        query=config.query,
+        perception=config.perception,
+        epsilon=config.epsilon,
+        use_direction=config.use_direction,
+        with_exclusion=config.with_exclusion,
+        early_exit_score=config.early_exit_score,
     )
-
-
-def matched_query_features(ref: Pharmacophore, mapping: list[tuple[int, int]]) -> int:
-    """How many query points appear in a ref→db mapping (EXCL pairs excluded)."""
-    return sum(1 for ri, _ in mapping if ref[ri].func != FuncGroup.EXCL)
-
-
-@dataclass
-class MatchResult:
-    ref_volume: float
-    db_volume: float
-    overlap_volume: float
-    excl_volume: float
-    tanimoto: float = 0.0
-    tversky_ref: float = 0.0
-    tversky_db: float = 0.0
-    mapping: list[tuple[int, int]] = field(default_factory=list)
-    database_pharmacophore: Pharmacophore = field(default_factory=Pharmacophore)
-    matched_db_pharmacophore: Pharmacophore = field(default_factory=Pharmacophore)
-    aligned_mol: Any | None = None
+    hits = searcher._screen_one_mol(
+        mol,
+        conformations=config.conformations,
+        min_matches=config.min_matches,
+        keep=config.keep,
+        metric=config.metric,
+    )
+    return [(index, h) for h in hits]
 
 
 @dataclass
 class PharmacophoreSearch:
-    """Align a reference pharmacophore to database pharmacophores or 3D molecules.
+    """Align a :class:`QueryPharmacophore` to one or more database molecules.
 
-    When ``ref`` is provided at construction, ``perception_options`` is fixed to the
-    molecule feature types required to match that query (see
-    ``perception_options_from_pharmacophore``). ``screen`` uses those
-    flags unless a different reference is passed explicitly.
-
-    ``min_matched_query_features`` sets how many query points must appear in the
-    alignment mapping for a hit. ``None`` (default) requires every matchable query
-    point (all except EXCL and UNDEF). Set to a smaller integer to allow partial matches.
+    ``perception`` controls how each database molecule is converted to a
+    :class:`MoleculePharmacophore`. When ``None`` (the default) every molecule
+    feature type is enabled.
     """
 
-    ref: Pharmacophore | None = None
+    query: QueryPharmacophore
+    perception: MoleculePharmacophorePerception | None = None
     epsilon: float = 0.5
     use_direction: bool = True
     with_exclusion: bool = True
     early_exit_score: float = 0.98
-    min_matched_query_features: int | None = None
-    _perception_options: PerceptionOptions | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._sync_perception_options()
-
-    def __setattr__(self, name: str, value: object) -> None:
-        super().__setattr__(name, value)
-        if name == "ref":
-            self._sync_perception_options()
-
-    def _sync_perception_options(self) -> None:
-        if self.ref is None:
-            object.__setattr__(self, "_perception_options", None)
-        else:
-            object.__setattr__(
-                self,
-                "_perception_options",
-                perception_options_from_pharmacophore(self.ref),
+        if not isinstance(self.query, QueryPharmacophore):
+            raise TypeError(
+                "PharmacophoreSearch.query must be a QueryPharmacophore "
+                f"(got {type(self.query).__name__})"
             )
+        if self.perception is None:
+            self.perception = MoleculePharmacophorePerception()
 
-    def refresh_perception_options(self) -> None:
-        """Re-derive perception flags from the current ``ref`` (e.g. after in-place edits)."""
-        self._sync_perception_options()
-
-    @property
-    def perception_options(self) -> PerceptionOptions | None:
-        """Perception flags bound at init from ``ref`` (``None`` if no reference is set)."""
-        return self._perception_options
-
-    def _perception_options_for(self, ref: Pharmacophore) -> PerceptionOptions:
-        if ref is self.ref and self._perception_options is not None:
-            return self._perception_options
-        return perception_options_from_pharmacophore(ref)
-
-    def _screen_config(self) -> _ScreenConfig:
-        if self.ref is None:
-            raise ValueError(
-                "Reference pharmacophore required: pass PharmacophoreSearch(ref)."
-            )
-        return _ScreenConfig(
-            ref=self.ref,
-            epsilon=self.epsilon,
-            use_direction=self.use_direction,
-            with_exclusion=self.with_exclusion,
-            early_exit_score=self.early_exit_score,
-            min_matched_query_features=self.min_matched_query_features,
-        )
-
-    def _effective_min_matched_query_features(self, ref: Pharmacophore) -> int:
-        n_query = count_query_features(ref)
-        if n_query == 0:
-            return 0
-        min_req = (
-            n_query
-            if self.min_matched_query_features is None
-            else self.min_matched_query_features
-        )
-        if min_req < 1:
-            raise ValueError("min_matched_query_features must be >= 1")
-        if min_req > n_query:
-            raise ValueError(
-                f"min_matched_query_features ({min_req}) exceeds matchable query "
-                f"features ({n_query})"
-            )
-        return min_req
-
-    def _resolve_ref(
-        self, ref: Pharmacophore | None, db: Pharmacophore | None
-    ) -> tuple[Pharmacophore, Pharmacophore]:
-        if db is None:
-            if self.ref is None:
-                raise ValueError(
-                    "Reference pharmacophore required: pass PharmacophoreSearch(ref) "
-                    "or search(ref, db)."
-                )
-            return self.ref, ref
-        if ref is None:
-            if self.ref is None:
-                raise ValueError(
-                    "Reference pharmacophore required: pass PharmacophoreSearch(ref) "
-                    "or search(ref, db)."
-                )
-            return self.ref, db
-        return ref, db
-
-    def search(
-        self, ref_or_db: Pharmacophore, db: Pharmacophore | None = None
-    ) -> MatchResult:
-        """Match reference to database pharmacophore.
-
-        Call as ``search(db)`` when ``ref`` was passed to ``PharmacophoreSearch(ref)``,
-        or as ``search(ref, db)`` for a one-off reference.
-        """
-        result, _ = self._search_with_alignment(
-            ref_or_db if db is not None else None, db or ref_or_db
-        )
-        return result
-
+    # ------------------------------------------------------------------ search
     def _search_with_alignment(
-        self, ref_or_db: Pharmacophore | None, db: Pharmacophore
+        self,
+        query: QueryPharmacophore,
+        db: Pharmacophore,
+        min_matches: int,
     ) -> tuple[MatchResult, SolutionInfo]:
-        ref, db = self._resolve_ref(ref_or_db, db)
         use_dir = self.use_direction
-        ref_volume, excl_size = compute_ref_volume(ref, use_dir)
+        ref_volume, excl_size = compute_ref_volume(query, use_dir)
         db_volume = compute_db_volume(db, use_dir)
-        ref_size = len(ref)
+        ref_size = len(query)
         db_size = len(db)
-        min_matched = self._effective_min_matched_query_features(ref)
 
-        func_map = FunctionMapping(ref, db, self.epsilon)
+        func_map = FunctionMapping(query, db, self.epsilon)
         f_map = func_map.get_next_map()
-        if not f_map or len(f_map) < min_matched:
+        if not f_map or len(f_map) < min_matches:
             return (
                 MatchResult(
                     ref_volume,
@@ -329,23 +340,23 @@ class PharmacophoreSearch:
 
         while f_map:
             msize = len(f_map)
-            if msize < min_matched:
+            if msize < min_matches:
                 f_map = func_map.get_next_map()
                 continue
             working = list(f_map)
             if self.with_exclusion:
                 for i in range(ref_size):
-                    if ref[i].func != FuncGroup.EXCL:
+                    if query[i].type != PointType.EXCL:
                         continue
                     for j in range(db_size):
-                        if db[j].func == FuncGroup.EXCL:
+                        if db[j].type == PointType.EXCL:
                             continue
                         working.append((i, j))
 
             if (msize > max_size) and (
                 (msize / (ref_size - excl_size + db_size - msize)) > best_score
             ):
-                aligner = Alignment(ref, db, working)
+                aligner = Alignment(query, db, working)
                 r = aligner.align(use_dir)
                 if best.volume < r.volume:
                     best = r
@@ -361,7 +372,7 @@ class PharmacophoreSearch:
 
             f_map = func_map.get_next_map()
 
-        if matched_query_features(ref, best_map) < min_matched:
+        if matched_query_features(query, best_map) < min_matches:
             best_map = []
 
         rot_mat = quat_to_rotation_matrix(best.rotor)
@@ -371,19 +382,27 @@ class PharmacophoreSearch:
 
         excl_vol = 0.0
         for i in range(ref_size):
-            if ref[i].func != FuncGroup.EXCL:
+            if query[i].type != PointType.EXCL:
                 continue
             for j in range(db_size):
-                excl_vol += volume_overlap(ref[i], db_work[j], use_dir)
+                excl_vol += volume_overlap(query[i], db_work[j], use_dir)
 
         overlap_vol = 0.0
-        matched = Pharmacophore()
+        matched = MoleculePharmacophore()
         for ri, di in best_map:
-            rp, dp = ref[ri], db_work[di]
-            if rp.func == FuncGroup.EXCL or dp.func == FuncGroup.EXCL:
+            rp, dp = query[ri], db_work[di]
+            if rp.type == PointType.EXCL or dp.type == PointType.EXCL:
                 continue
             overlap_vol += volume_overlap(rp, dp, use_dir)
-            matched.append_point(PharmacophorePoint(dp.x, dp.y, dp.z, dp.func, dp.alpha, dp.has_normal, dp.nx, dp.ny, dp.nz))
+            normal = (dp.nx, dp.ny, dp.nz) if dp.has_normal else None
+            matched.add_point(
+                PharmacophorePoint(
+                    type=dp.type,
+                    center=(dp.x, dp.y, dp.z),
+                    sigma=dp.sigma,
+                    normal=normal,
+                )
+            )
 
         aligned_vol = overlap_vol - excl_vol
         best.volume = aligned_vol
@@ -415,116 +434,149 @@ class PharmacophoreSearch:
             best,
         )
 
+    # --------------------------------------------------------- public screen()
+    def _screen_one_mol(
+        self,
+        mol: Any,
+        *,
+        conformations: Conformations,
+        min_matches: int,
+        keep: KeepMode,
+        metric: str,
+    ) -> list[MatchResult]:
+        from .rdkit_perception import molecule_pharmacophore_from_molecule
+
+        conf_ids = _resolve_conformations(mol, conformations)
+        results: list[MatchResult] = []
+        best: MatchResult | None = None
+        for cid in conf_ids:
+            db = molecule_pharmacophore_from_molecule(
+                mol, self.perception, conf_id=cid
+            )
+            match, alignment = self._search_with_alignment(self.query, db, min_matches)
+            if not match.mapping:
+                continue
+            match.conf_id = cid
+            match.aligned_mol = _build_aligned_mol(mol, cid, alignment)
+            if keep == "best":
+                if _is_better(match, best, metric):
+                    best = match
+            else:
+                results.append(match)
+        if keep == "best":
+            return [best] if best is not None else []
+        return results
+
     def screen(
         self,
-        mol: Any,
+        mols: Any,
         *,
-        n_jobs: int | None = None,
-        progress: bool = False,
-        db: Pharmacophore | None = None,
-        conf_id: int = 0,
-    ) -> MatchResult | None | list[tuple[int, MatchResult]]:
-        """Match reference to one or more molecules.
-
-        Single molecule: returns a ``MatchResult`` on a hit, else ``None``.
-
-        Batch: returns ``[(index, MatchResult), ...]`` for hits only. Pass a list
-        of RDKit molecules, or tuples such as ``(line_idx, smiles, mol)`` (the
-        first element is used as ``index``). ``n_jobs=None`` (default) uses all
-        available CPUs; ``n_jobs=1`` runs sequentially. Set ``progress=True`` for
-        a tqdm bar over the batch (requires the ``tqdm`` package).
-        """
-        if _is_molecule_batch(mol):
-            if db is not None:
-                raise ValueError("db=... is only supported when screening a single molecule.")
-            indexed_mols = _parse_indexed_molecules(mol)
-            return self._screen_batch(
-                indexed_mols,
-                n_jobs=n_jobs,
-                conf_id=conf_id,
-                progress=progress,
-            )
-        return self._screen_single(mol, db=db, conf_id=conf_id)
-
-    def _screen_single(
-        self,
-        mol: Any,
-        *,
-        db: Pharmacophore | None = None,
-        conf_id: int = 0,
-    ) -> MatchResult | None:
-        ref = self.ref
-        if ref is None:
-            raise ValueError(
-                "Reference pharmacophore required: pass PharmacophoreSearch(ref)."
-            )
-        if db is None:
-            from .rdkit_perception import pharmacophore_from_molecule
-
-            db = pharmacophore_from_molecule(
-                mol, self._perception_options_for(ref), conf_id=conf_id
-            )
-        res, alignment = self._search_with_alignment(ref, db)
-        if not _is_match(res):
-            return None
-        try:
-            from rdkit import Chem
-
-            if mol.GetNumConformers() == 0:
-                return res
-            m = Chem.Mol(mol)
-            conf = m.GetConformer(conf_id)
-            n = m.GetNumAtoms()
-            coords = np.zeros((n, 3), dtype=float)
-            for a in range(n):
-                p = conf.GetAtomPosition(a)
-                coords[a, 0], coords[a, 1], coords[a, 2] = p.x, p.y, p.z
-            rot = quat_to_rotation_matrix(alignment.rotor)
-            new_xyz = position_molecule_coords(coords, rot, alignment)
-            for a in range(n):
-                conf.SetAtomPosition(a, new_xyz[a].tolist())
-            res.aligned_mol = m
-        except Exception:
-            res.aligned_mol = None
-        return res
-
-    def _screen_batch(
-        self,
-        indexed_mols: Sequence[tuple[int, Any]],
-        *,
-        n_jobs: int | None,
-        conf_id: int,
-        progress: bool = False,
+        conformations: Conformations = "all",
+        min_matches: int | None = None,
+        keep: KeepMode = "best",
+        metric: Metric = "tanimoto",
+        n_jobs: int = 0,
+        progress: bool = True,
     ) -> list[tuple[int, MatchResult]]:
-        if len(indexed_mols) == 0:
+        """Match the query against one or more molecules.
+
+        Parameters
+        ----------
+        mols
+            A single ``Chem.Mol``, a list of ``Chem.Mol``, or a list of tuples
+            whose last element is a molecule (e.g. ``(line_idx, smiles, mol)`` —
+            the first element is used as the reported hit index).
+        conformations
+            ``'all'`` (default), ``'single'`` (first conformer only), or a
+            positive ``int`` for the first N conformers.
+        min_matches
+            Minimum number of query points that must map to a molecule feature
+            for a hit. Defaults to ``count_matchable_query_points(query)``.
+        keep
+            ``'best'`` (default) keeps only the highest-scoring conformer per
+            molecule; ``'all'`` keeps every conformer that satisfies
+            ``min_matches``.
+        metric
+            Tie-breaker for ``keep='best'``. One of ``'tanimoto'``,
+            ``'overlap_volume'``, ``'excl_volume'``, ``'tversky_ref'``,
+            ``'tversky_db'``. All metrics are maximised except ``excl_volume``
+            (minimised — smaller overlap with the exclusion sphere is better).
+        n_jobs
+            Worker processes. ``0`` (default) uses every available CPU; ``1``
+            runs sequentially.
+        progress
+            Show a tqdm progress bar over the molecule list (requires the
+            optional ``tqdm`` dependency).
+
+        Returns
+        -------
+        list[tuple[int, MatchResult]]
+            One entry per matched (molecule, conformer). Empty when nothing
+            matched.
+        """
+        _validate_metric(metric)
+        if min_matches is None:
+            min_matches = count_matchable_query_points(self.query)
+        if min_matches < 1:
+            raise ValueError("min_matches must be >= 1")
+        max_matches = count_matchable_query_points(self.query)
+        if min_matches > max_matches:
+            raise ValueError(
+                f"min_matches ({min_matches}) exceeds matchable query points "
+                f"({max_matches})"
+            )
+
+        if _is_molecule_batch(mols):
+            indexed = _parse_indexed_molecules(mols)
+        else:
+            if not _is_rdkit_mol(mols):
+                raise TypeError(
+                    "mols must be an RDKit Chem.Mol or a sequence of molecules"
+                )
+            indexed = [(0, mols)]
+
+        if not indexed:
             return []
 
-        config = self._screen_config()
-        workers = min(_resolve_n_jobs(n_jobs), len(indexed_mols))
-        total = len(indexed_mols)
+        config = _ScreenConfig(
+            query=self.query,
+            perception=self.perception,
+            epsilon=self.epsilon,
+            use_direction=self.use_direction,
+            with_exclusion=self.with_exclusion,
+            early_exit_score=self.early_exit_score,
+            conformations=conformations,
+            min_matches=min_matches,
+            keep=keep,
+            metric=metric,
+        )
+
+        workers = min(_resolve_n_jobs(n_jobs), len(indexed))
+        total = len(indexed)
+        hits: list[tuple[int, MatchResult]] = []
         if workers <= 1:
-            hits: list[tuple[int, MatchResult]] = []
-            mols = indexed_mols
+            iterable: Any = indexed
             if progress:
-                mols = _progress_iter(mols, total=total, desc="Screening")
-            for index, mol in mols:
-                hit = self._screen_single(mol, conf_id=conf_id)
-                if hit is not None:
-                    hits.append((index, hit))
+                iterable = _progress_iter(iterable, total=total, desc="Screening")
+            for index, mol in iterable:
+                for match in self._screen_one_mol(
+                    mol,
+                    conformations=conformations,
+                    min_matches=min_matches,
+                    keep=keep,
+                    metric=metric,
+                ):
+                    hits.append((index, match))
             return hits
 
-        tasks = [(config, index, mol, conf_id) for index, mol in indexed_mols]
-        hits = []
+        tasks = [(config, index, mol) for index, mol in indexed]
         with ProcessPoolExecutor(
             max_workers=workers,
             mp_context=_process_pool_context(),
         ) as executor:
-            results = executor.map(_screen_mol_worker, tasks)
+            results = executor.map(_worker, tasks)
             if progress:
                 results = _progress_iter(results, total=total, desc="Screening")
-            for item in results:
-                if item is not None:
-                    hits.append(item)
+            for chunk in results:
+                hits.extend(chunk)
         return hits
-
-    search_with_rdkit_mol = screen
