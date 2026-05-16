@@ -11,10 +11,10 @@ from pypharao import *
 
 SMI_FILE = Path(__file__).resolve().parent / "datasets" / "compounds_10k.smi"
 MAX_COMPOUNDS = None  # None = use the whole file
-
+#MAX_COMPOUNDS = 500
 
 # ------------------------------------------------------------
-# Build a query pharmacophore from a 3D structure of phenol
+# Build two query pharmacophores from a 3D structure of phenol
 # ------------------------------------------------------------
 
 ref_mol = Chem.AddHs(Chem.MolFromSmiles("c1ccccc1O"))
@@ -25,15 +25,31 @@ perception = QueryPharmacophorePerception()
 print("Auto-perceivable feature types for a query pharmacophore:")
 perception.print_features()
 
-query = query_pharmacophore_from_molecule(ref_mol, perception, name="phenol")
-print(f"\nQuery {query.get_name()!r} ({len(query)} features):")
-for p in query:
+# Pharmacophore 1
+pharmacophore_1 = query_pharmacophore_from_molecule(ref_mol, perception, name="phenol")
+print(f"\nQuery {pharmacophore_1.get_name()!r} ({len(pharmacophore_1)} features):")
+for p in pharmacophore_1:
     print(f"  {p.type.value:<10} center={p.center}")
 
-# Self-screen sanity check.
-searcher = PharmacophoreSearch(query)
-print("\nSelf-screen:")
-print_match_results(searcher.screen(ref_mol, progress=False))
+# Pharmacophore 2: same as pharmacophore_1 but with AROM relaxed to AROM_OR_LIPO.
+pharmacophore_2 = pharmacophore_1.copy()
+for i, p in enumerate(pharmacophore_2):
+    if p.type == PointType.AROM:
+        pharmacophore_2.update_point(i, type=PointType.AROM_OR_LIPO)
+        break
+pharmacophore_2.set_name("phenol-arom-or-lipo")
+print(f"\nQuery {pharmacophore_2.get_name()!r} ({len(pharmacophore_2)} features):")
+for p in pharmacophore_2:
+    print(f"  {p.type.value:<10} center={p.center}")
+
+# Self-screen sanity check
+searcher_1 = PharmacophoreSearch(pharmacophore_1)
+print("\nSelf-screen pharmacophore 1:")
+print_match_results(searcher_1.screen(ref_mol, progress=False))
+
+searcher_2 = PharmacophoreSearch(pharmacophore_2)
+print("\nSelf-screen pharmacophore 2:")
+print_match_results(searcher_2.screen(ref_mol, progress=False))
 
 
 # ------------------------------------------------------------
@@ -75,6 +91,16 @@ print(
 # Run the screen and report the top hits
 # ------------------------------------------------------------
 
-hits = searcher.screen(prepared, progress=True)
+# Pharmacophore 1
+print("Pharmacophore 1")
+hits = searcher_1.screen(prepared, progress=True)
 sorted_hits = sort_match_results(hits, sort="descending", key="tanimoto")
 print_match_results(sorted_hits, limit=10)
+print()
+
+# Pharmacophore 2
+print("Pharmacophore 2")
+hits = searcher_2.screen(prepared, progress=True)
+sorted_hits = sort_match_results(hits, sort="descending", key="tanimoto")
+print_match_results(sorted_hits, limit=10)
+print()

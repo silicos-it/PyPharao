@@ -14,17 +14,19 @@ from typing import Any, ClassVar, Iterator
 class PointType(str, Enum):
     """Pharmacophore feature type (the ``Type`` of a PharmacophorePoint).
 
-    Values use the literal Pharao-style strings (``"AROM|LIPO"``, ``"HACC&HDON"``,
-    ``"HACC|HDON"``); the Python identifiers use underscores instead.
+    The compound query types use underscored ``_OR_`` / ``_AND_`` spellings
+    (``"AROM_OR_LIPO"``, ``"HACC_OR_HDON"``, ``"HACC_AND_HDON"``) instead of
+    the original Pharao ``|`` / ``&`` notation, both for the Python identifier
+    and for the underlying string ``.value``.
     """
 
     AROM = "AROM"
     LIPO = "LIPO"
-    AROM_OR_LIPO = "AROM|LIPO"
+    AROM_OR_LIPO = "AROM_OR_LIPO"
     HDON = "HDON"
     HACC = "HACC"
-    HACC_AND_HDON = "HACC&HDON"
-    HACC_OR_HDON = "HACC|HDON"
+    HACC_AND_HDON = "HACC_AND_HDON"
+    HACC_OR_HDON = "HACC_OR_HDON"
     POSC = "POSC"
     NEGC = "NEGC"
     EXCL = "EXCL"
@@ -242,6 +244,17 @@ class Pharmacophore:
         self._check_type(point)
         self._points[idx] = point
 
+    def update_point(self, idx: int, **changes: Any) -> None:
+        """Replace the point at ``idx`` with a copy whose selected fields are updated.
+
+        Convenience wrapper for
+        ``self.set_point(idx, self[idx].replace(**changes))``. Accepts the same
+        keyword arguments as :meth:`PharmacophorePoint.replace` (``type``,
+        ``center``, ``sigma``, ``normal``). Validation against the subclass's
+        ``allowed_types`` still applies.
+        """
+        self.set_point(idx, self._points[idx].replace(**changes))
+
     def remove_point(self, idx: int) -> None:
         """Remove the point at ``idx``."""
         del self._points[idx]
@@ -414,9 +427,10 @@ class QueryPharmacophore(Pharmacophore):
 class MoleculePharmacophore(Pharmacophore):
     """Pharmacophore perceived from a database molecule.
 
-    Allowed types: ``AROM, LIPO, HDON, HACC, HACC&HDON, POSC, NEGC``. ``EXCL`` and
-    ``UNDEF`` are query-only and rejected here; ``AROM|LIPO`` / ``HACC|HDON``
-    are query-side OR features and not allowed in a molecule pharmacophore.
+    Allowed types: ``AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC``.
+    ``EXCL`` and ``UNDEF`` are query-only and rejected here; ``AROM_OR_LIPO``
+    and ``HACC_OR_HDON`` are query-side OR features and not allowed in a
+    molecule pharmacophore.
     """
 
     allowed_types: ClassVar[frozenset[PointType]] = frozenset(

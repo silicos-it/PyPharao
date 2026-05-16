@@ -74,17 +74,17 @@ q = p.replace(center=(1, 0, 0))   # new sigma defaults are filled in for you
 | ---------------- | ------------- | ------ | ------------------------------------------------------------ |
 | `AROM`           | 0.7           | yes    | Aromatic ring centroids with plane normals                   |
 | `LIPO`           | 0.7           | no     | Lipophilic regions (from molecular surface), no aromatics    |
-| `AROM|LIPO`      | 0.7           | yes    | Either an AROM or a LIPO group, or both (query only)          |
+| `AROM_OR_LIPO`   | 0.7           | yes    | Either an AROM or a LIPO group, or both (query only)         |
 | `HDON`           | 1.0           | no     | H-bond donors (N/O with H, not negatively charged)           |
 | `HACC`           | 1.0           | no     | H-bond acceptors (N/O, with Pharao-style filters)            |
-| `HACC&HDON`      | 1.0           | no     | Both a HACC and an HDON at the same site                     |
-| `HACC|HDON`      | 1.0           | no     | Either an HACC or an HDON group (query only)                  |
+| `HACC_AND_HDON`  | 1.0           | no     | Both a HACC and an HDON at the same site                     |
+| `HACC_OR_HDON`   | 1.0           | no     | Either an HACC or an HDON group (query only)                 |
 | `POSC`           | 1.0           | no     | Positively charged atoms                                     |
 | `NEGC`           | 1.0           | no     | Negatively charged atoms                                     |
 | `EXCL`           | 1.6           | no     | Exclusion sphere (query only; penalises overlap)             |
 | `UNDEF`          | 1.0           | no     | Undefined placeholder (matches any molecule feature type)    |
 
-`PointType` enum members use underscores (`PointType.AROM_OR_LIPO`, `PointType.HACC_AND_HDON`, `PointType.HACC_OR_HDON`) but the `.value` strings keep the Pharao-style `|` / `&` notation.
+`PointType` enum members and their underlying `.value` strings both use the underscored spellings (`PointType.AROM_OR_LIPO`, `PointType.HACC_AND_HDON`, `PointType.HACC_OR_HDON`).
 
 The defaults are available as `DEFAULT_SIGMA[PointType.X]` and `TYPE_HAS_NORMAL[PointType.X]`.
 
@@ -92,8 +92,8 @@ The defaults are available as `DEFAULT_SIGMA[PointType.X]` and `TYPE_HAS_NORMAL[
 
 |                          | Allowed `PointType`s                                                          |
 | ------------------------ | ----------------------------------------------------------------------------- |
-| `QueryPharmacophore`     | every `PointType` (including `EXCL`, `UNDEF`, `AROM|LIPO`, `HACC|HDON`, `HACC&HDON`) |
-| `MoleculePharmacophore`  | `AROM, LIPO, HDON, HACC, HACC&HDON, POSC, NEGC`                               |
+| `QueryPharmacophore`     | every `PointType` (including `EXCL`, `UNDEF`, `AROM_OR_LIPO`, `HACC_OR_HDON`, `HACC_AND_HDON`) |
+| `MoleculePharmacophore`  | `AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC`                           |
 
 Adding a point of a disallowed type raises `ValueError`.
 
@@ -108,6 +108,7 @@ len(q)                     # 2
 for p in q: ...            # iterate
 q[0]                       # index access
 q.set_point(0, q[0].replace(center=(0.5, 0, 0)))
+q.update_point(0, type=PointType.AROM_OR_LIPO)  # shorthand for set_point + replace
 q.remove_point(1)
 q.clear()
 q.copy()                   # shallow copy preserving subclass + name
@@ -115,7 +116,142 @@ q.set_name("query_v2")
 q.get_name()
 ```
 
+> **Note on copying.** `pharmacophore_2 = pharmacophore_1` only binds a second
+> name to the *same* object; later edits affect both names. Use
+> `pharmacophore_2 = pharmacophore_1.copy()` whenever you need an independent
+> pharmacophore to modify (for example to derive an `AROM → AROM_OR_LIPO`
+> variant). The copy is shallow: it produces a new `Pharmacophore` whose
+> `_points` list is new, but the `PharmacophorePoint` objects themselves are
+> shared. Since `PharmacophorePoint` is immutable (`point.replace(...)` returns
+> a new instance, line 64), this is safe in practice.
+
 `q.points` returns a snapshot list; mutate the collection through `add_point` / `set_point` / `remove_point` / `clear` so the type rules are enforced.
+
+### `PharmacophorePoint` API reference
+
+`PharmacophorePoint` is a `@dataclass(frozen=True)`, so instances are immutable and hashable (usable as dict keys / set members). The constructor validates inputs and raises `ValueError` for inconsistent combinations (e.g. a missing `normal` on a type that requires one, or providing a `normal` for a type that doesn't carry one).
+
+**Fields**
+
+| Name | Type | Notes |
+|---|---|---|
+| `type` | `PointType` | Coerced from `str` at construction if needed. |
+| `x`, `y`, `z` | `float` | Centre coordinates, ångström. |
+| `sigma` | `float` | Gaussian width, ångström. Defaults to `DEFAULT_SIGMA[type]` if omitted at construction. |
+| `nx`, `ny`, `nz` | `float` | Absolute tip coordinates of the feature normal (Pharao convention). All `0.0` for types without a normal. |
+
+**Class attribute**
+
+| Name | Purpose |
+|---|---|
+| `Type` (`ClassVar`) | Alias for the `PointType` enum (so `PharmacophorePoint.Type.AROM` is `PointType.AROM`). |
+
+**Constructor**
+
+```python
+PharmacophorePoint(
+    type: PointType | str,
+    center: tuple[float, float, float],
+    sigma: float | None = None,                        # defaults to DEFAULT_SIGMA[type]
+    normal: tuple[float, float, float] | None = None,  # required iff TYPE_HAS_NORMAL[type]
+)
+```
+
+**Properties (read-only)**
+
+| Property | Returns |
+|---|---|
+| `center` | `(x, y, z)` tuple. |
+| `normal` | `(nx, ny, nz)` tuple for types that carry a normal, else `None`. |
+| `has_normal` | `bool` — shortcut for `TYPE_HAS_NORMAL[self.type]`. |
+
+**Methods**
+
+| Method | Purpose |
+|---|---|
+| `replace(*, type=None, center=None, sigma=None, normal=None)` | Returns a **new** `PharmacophorePoint` with selected fields updated (keyword-only). If `type` changes to one that doesn't carry a normal, the new normal is zeroed; if it does and you don't pass one, the old normal is preserved. |
+
+**Auto-generated by `@dataclass(frozen=True)`**
+
+| Member | Behaviour |
+|---|---|
+| `__eq__` | Structural equality across all eight fields. |
+| `__hash__` | Hashable (because `frozen=True`). |
+| `__repr__` | `PharmacophorePoint(type=…, x=…, y=…, z=…, sigma=…, nx=…, ny=…, nz=…)`. |
+| `__setattr__` *(blocked)* | Raises `FrozenInstanceError` — instances are immutable. |
+
+### `Pharmacophore` API reference
+
+The tables below list everything available on a `Pharmacophore` (and its `QueryPharmacophore` / `MoleculePharmacophore` subclasses). Anything that mutates the point list goes through `_check_type` and raises `ValueError` if the point's type isn't in the subclass's `allowed_types`.
+
+**Class attributes**
+
+| Name | Type | Purpose |
+|---|---|---|
+| `allowed_types` | `ClassVar[frozenset[PointType]]` | Which point types may be added. |
+| `kind` | `ClassVar[str]` | Tag stored in JSON (`"query"` / `"molecule"`); used to round-trip the subclass. |
+
+**Iteration and indexing**
+
+| Member | Behaviour |
+|---|---|
+| `points` (property) | Returns a *snapshot* `list[PharmacophorePoint]`; mutating the list does **not** mutate the pharmacophore. |
+| `len(ph)` | Number of points. |
+| `for p in ph: ...` | Iterate points in order. |
+| `ph[i]` | Get the `PharmacophorePoint` at index `i`. |
+
+**Editing points**
+
+| Method | Signature | Notes |
+|---|---|---|
+| `add_point` | `(point)` | Append after validating type. |
+| `set_point` | `(idx, point)` | Replace at `idx` after validating type. |
+| `update_point` | `(idx, **changes)` | Shorthand for `set_point(idx, self[idx].replace(**changes))`. Accepts `type=`, `center=`, `sigma=`, `normal=`. |
+| `remove_point` | `(idx)` | Delete the point at `idx`. |
+| `clear` | `()` | Remove every point. |
+
+**Copying**
+
+| Method | Returns |
+|---|---|
+| `copy()` | Shallow copy preserving the subclass and (for `QueryPharmacophore`) the name. The `_points` list is new; `PharmacophorePoint` objects are shared (they are immutable, so this is safe). |
+
+**JSON I/O**
+
+| Method | Direction | Returns / accepts |
+|---|---|---|
+| `to_json_dict()` | export | `dict[str, Any]` |
+| `to_json(**kwargs)` | export | `str` (kwargs forwarded to `json.dumps`) |
+| `write_json(path, **kwargs)` | export | writes UTF-8 file |
+| `from_json_dict(d)` *(classmethod)* | import | round-trips the right subclass via `kind` |
+| `from_json(s)` *(classmethod)* | import | parses a JSON string |
+| `from_json_file(path)` *(classmethod)* | import | reads a JSON file |
+
+**Pharao `.phar` text I/O**
+
+| Method | Direction |
+|---|---|
+| `to_phar_text()` | export `str` in Pharao `.phar` format |
+| `write_phar(path)` | write `.phar` to disk |
+| `from_phar_text(text)` *(classmethod)* | parse a `.phar` string |
+| `read_phar(path)` *(classmethod)* | read a `.phar` file |
+
+**`QueryPharmacophore` extras**
+
+| Member | Kind |
+|---|---|
+| `__init__(points=None, name="")` | overridden constructor |
+| `get_name()` / `set_name(name)` | explicit accessors |
+| `name` | property + setter |
+
+`MoleculePharmacophore` adds no methods; it narrows `allowed_types` to `{AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC}`.
+
+**Module-level helpers**
+
+| Function | Purpose |
+|---|---|
+| `distance(p, q)` | Euclidean distance between two `PharmacophorePoint` centres. |
+| `cosine_normals(p, q)` | Cosine between the (relative) normal vectors of `p` and `q`; returns `0.0` if either point has no normal. |
 
 ### Generating query pharmacophores
 
@@ -153,7 +289,7 @@ AllChem.UFFOptimizeMolecule(mol)
 q = query_pharmacophore_from_molecule(mol, name="phenol")
 ```
 
-`query_pharmacophore_from_molecule` returns a `QueryPharmacophore`. Compound query types (`AROM|LIPO`, `HACC|HDON`) are **not** auto-perceived — refine them by hand if desired. `HACC&HDON` is created automatically whenever an `HDON` and an `HACC` sit at the same atom (the two originals are removed).
+`query_pharmacophore_from_molecule` returns a `QueryPharmacophore`. Compound query types (`AROM_OR_LIPO`, `HACC_OR_HDON`) are **not** auto-perceived — refine them by hand if desired. `HACC_AND_HDON` is created automatically whenever an `HDON` and an `HACC` sit at the same atom (the two originals are removed).
 
 ```python
 query_pharmacophore_from_protein(...)  # raises NotImplementedError (placeholder)
@@ -169,10 +305,10 @@ A `PharmacophorePerception` instance controls **which feature types** are emitte
 Both subclasses cover the same seven auto-perceivable types and default to *all enabled*:
 
 ```
-AROM, LIPO, HDON, HACC, HACC&HDON, POSC, NEGC
+AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC
 ```
 
-`EXCL`, `UNDEF`, `AROM|LIPO` and `HACC|HDON` are never auto-perceived; add them manually if you need them. The base `PharmacophorePerception` is abstract — instantiate one of the two subclasses instead.
+`AROM` and `LIPO` are mutually exclusive at perception time: an aromatic ring is reported only as `AROM`, while a lipophilic moiety that is *not* aromatic is reported as `LIPO`. `EXCL`, `UNDEF`, `AROM_OR_LIPO` and `HACC_OR_HDON` are never auto-perceived; introduce them by hand on the resulting `QueryPharmacophore` (typically by converting an `AROM`/`LIPO` point to `AROM_OR_LIPO` or an `HDON`/`HACC` pair to `HACC_OR_HDON` — see `examples/03-modifying-pharmacophores.py`). The base `PharmacophorePerception` is abstract — instantiate one of the two subclasses instead.
 
 ### API
 
@@ -181,7 +317,7 @@ perception = QueryPharmacophorePerception()
 perception.print_features()                  # one line per feature type
 perception.is_enabled(PointType.LIPO)         # True
 perception.disable(PointType.LIPO)
-perception.enable("HACC&HDON")
+perception.enable("HACC_AND_HDON")
 perception.types_enabled()                    # list of currently enabled types
 for t in perception: ...                      # iterate over allowed types
 ```
@@ -200,6 +336,52 @@ A search needs:
 searcher = PharmacophoreSearch(query)                   # all molecule types perceived
 searcher = PharmacophoreSearch(query, perception=opts)  # custom molecule perception
 ```
+
+### `PharmacophoreSearch` API reference
+
+`PharmacophoreSearch` is a `@dataclass`, so the constructor accepts the fields below (positional or keyword) and each field is also accessible / reassignable on an existing instance.
+
+**Fields (= constructor parameters)**
+
+| Name | Type | Default | Purpose |
+|---|---|---|---|
+| `query` | `QueryPharmacophore` | *(required)* | Query pharmacophore. A `TypeError` is raised at construction if this isn't a `QueryPharmacophore`. |
+| `perception` | `MoleculePharmacophorePerception \| None` | `None` | How database molecules are perceived. `None` ⇒ a default `MoleculePharmacophorePerception()` is created in `__post_init__`. |
+| `epsilon` | `float` | `0.5` | Tolerance used by `FunctionMapping` when proposing candidate feature mappings. |
+| `use_direction` | `bool` | `True` | Use feature normals (AROM / AROM_OR_LIPO) in volume scoring and alignment. |
+| `with_exclusion` | `bool` | `True` | Include `EXCL` spheres when scoring (penalises overlap with database features). |
+| `early_exit_score` | `float` | `0.98` | Tanimoto threshold above which the search stops exploring further mappings. |
+
+**Public methods**
+
+| Method | Purpose |
+|---|---|
+| `screen(mols, *, conformations='all', min_matches=None, keep='best', metric='tanimoto', n_jobs=0, progress=True)` | The single public entry point. See [`screen()` parameters](#screen-parameters) below for the full breakdown. Returns `list[tuple[int, MatchResult]]`. |
+
+**Private / internal methods** (prefixed with `_`, not part of the supported API)
+
+| Method | Role |
+|---|---|
+| `__post_init__()` | Dataclass hook — validates `query` and fills in a default `perception`. |
+| `_search_with_alignment(query, db, min_matches)` | Core alignment loop: enumerate candidate function mappings via `FunctionMapping`, run `Alignment.align`, score, early-exit. Returns `(MatchResult, SolutionInfo)`. |
+| `_screen_one_mol(mol, *, conformations, min_matches, keep, metric)` | Iterates conformers of one molecule, calls `_search_with_alignment` per conformer, applies the `keep`/`metric` selection. |
+
+**Auto-generated by `@dataclass`**
+
+| Member | Behaviour |
+|---|---|
+| `__init__` | Built from the six fields above (positional or keyword). |
+| `__eq__` | Structural equality across the six fields. |
+| `__repr__` | `PharmacophoreSearch(query=…, perception=…, epsilon=0.5, …)` |
+
+**Module-level helpers used alongside `PharmacophoreSearch`** (re-exported by `from pypharao import *`)
+
+| Name | Purpose |
+|---|---|
+| `MatchResult` | Dataclass returned by `screen()`. See [§5 *Analysing the results*](#5-analysing-the-results). |
+| `sort_match_results(hits, sort=..., key=...)` | Sort hits by any metric. |
+| `print_match_results(hits, limit=...)` | Pretty-print hits as a table. |
+| `count_matchable_query_points(query)` | Default for `min_matches`; counts query points other than `EXCL` / `UNDEF`. |
 
 ### `screen()` parameters
 
