@@ -74,17 +74,17 @@ q = p.replace(center=(1, 0, 0))   # new sigma defaults are filled in for you
 | ---------------- | ------------- | ------ | ------------------------------------------------------------ |
 | `AROM`           | 0.7           | yes    | Aromatic ring centroids with plane normals                   |
 | `LIPO`           | 0.7           | no     | Lipophilic regions (from molecular surface), no aromatics    |
-| `AROM|LIPO`      | 0.7           | yes    | Either an AROM or a LIPO group, or both (query only)          |
+| `AROM_OR_LIPO`   | 0.7           | yes    | Either an AROM or a LIPO group, or both (query only)         |
 | `HDON`           | 1.0           | no     | H-bond donors (N/O with H, not negatively charged)           |
 | `HACC`           | 1.0           | no     | H-bond acceptors (N/O, with Pharao-style filters)            |
-| `HACC&HDON`      | 1.0           | no     | Both a HACC and an HDON at the same site                     |
-| `HACC|HDON`      | 1.0           | no     | Either an HACC or an HDON group (query only)                  |
+| `HACC_AND_HDON`  | 1.0           | no     | Both a HACC and an HDON at the same site                     |
+| `HACC_OR_HDON`   | 1.0           | no     | Either an HACC or an HDON group (query only)                 |
 | `POSC`           | 1.0           | no     | Positively charged atoms                                     |
 | `NEGC`           | 1.0           | no     | Negatively charged atoms                                     |
 | `EXCL`           | 1.6           | no     | Exclusion sphere (query only; penalises overlap)             |
 | `UNDEF`          | 1.0           | no     | Undefined placeholder (matches any molecule feature type)    |
 
-`PointType` enum members use underscores (`PointType.AROM_OR_LIPO`, `PointType.HACC_AND_HDON`, `PointType.HACC_OR_HDON`) but the `.value` strings keep the Pharao-style `|` / `&` notation.
+`PointType` enum members and their underlying `.value` strings both use the underscored spellings (`PointType.AROM_OR_LIPO`, `PointType.HACC_AND_HDON`, `PointType.HACC_OR_HDON`).
 
 The defaults are available as `DEFAULT_SIGMA[PointType.X]` and `TYPE_HAS_NORMAL[PointType.X]`.
 
@@ -92,8 +92,8 @@ The defaults are available as `DEFAULT_SIGMA[PointType.X]` and `TYPE_HAS_NORMAL[
 
 |                          | Allowed `PointType`s                                                          |
 | ------------------------ | ----------------------------------------------------------------------------- |
-| `QueryPharmacophore`     | every `PointType` (including `EXCL`, `UNDEF`, `AROM|LIPO`, `HACC|HDON`, `HACC&HDON`) |
-| `MoleculePharmacophore`  | `AROM, LIPO, HDON, HACC, HACC&HDON, POSC, NEGC`                               |
+| `QueryPharmacophore`     | every `PointType` (including `EXCL`, `UNDEF`, `AROM_OR_LIPO`, `HACC_OR_HDON`, `HACC_AND_HDON`) |
+| `MoleculePharmacophore`  | `AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC`                           |
 
 Adding a point of a disallowed type raises `ValueError`.
 
@@ -153,7 +153,7 @@ AllChem.UFFOptimizeMolecule(mol)
 q = query_pharmacophore_from_molecule(mol, name="phenol")
 ```
 
-`query_pharmacophore_from_molecule` returns a `QueryPharmacophore`. Compound query types (`AROM|LIPO`, `HACC|HDON`) are **not** auto-perceived — refine them by hand if desired. `HACC&HDON` is created automatically whenever an `HDON` and an `HACC` sit at the same atom (the two originals are removed).
+`query_pharmacophore_from_molecule` returns a `QueryPharmacophore`. Compound query types (`AROM_OR_LIPO`, `HACC_OR_HDON`) are **not** auto-perceived — refine them by hand if desired. `HACC_AND_HDON` is created automatically whenever an `HDON` and an `HACC` sit at the same atom (the two originals are removed).
 
 ```python
 query_pharmacophore_from_protein(...)  # raises NotImplementedError (placeholder)
@@ -169,10 +169,10 @@ A `PharmacophorePerception` instance controls **which feature types** are emitte
 Both subclasses cover the same seven auto-perceivable types and default to *all enabled*:
 
 ```
-AROM, LIPO, HDON, HACC, HACC&HDON, POSC, NEGC
+AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC
 ```
 
-`EXCL`, `UNDEF`, `AROM|LIPO` and `HACC|HDON` are never auto-perceived; add them manually if you need them. The base `PharmacophorePerception` is abstract — instantiate one of the two subclasses instead.
+`AROM` and `LIPO` are mutually exclusive at perception time: an aromatic ring is reported only as `AROM`, while a lipophilic moiety that is *not* aromatic is reported as `LIPO`. `EXCL`, `UNDEF`, `AROM_OR_LIPO` and `HACC_OR_HDON` are never auto-perceived; introduce them by hand on the resulting `QueryPharmacophore` (typically by converting an `AROM`/`LIPO` point to `AROM_OR_LIPO` or an `HDON`/`HACC` pair to `HACC_OR_HDON` — see `examples/03-modifying-pharmacophores.py`). The base `PharmacophorePerception` is abstract — instantiate one of the two subclasses instead.
 
 ### API
 
@@ -181,7 +181,7 @@ perception = QueryPharmacophorePerception()
 perception.print_features()                  # one line per feature type
 perception.is_enabled(PointType.LIPO)         # True
 perception.disable(PointType.LIPO)
-perception.enable("HACC&HDON")
+perception.enable("HACC_AND_HDON")
 perception.types_enabled()                    # list of currently enabled types
 for t in perception: ...                      # iterate over allowed types
 ```

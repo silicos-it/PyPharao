@@ -4,17 +4,17 @@ Matching is directional: the ``ref`` (query) point sets which database
 (molecule) types are compatible. The full table — also reflected in
 ``functions_compatible`` — is::
 
-    Query AROM        ↔ molecule AROM
-    Query LIPO        ↔ molecule LIPO
-    Query AROM|LIPO   ↔ molecule AROM or LIPO
-    Query HDON        ↔ molecule HDON
-    Query HACC        ↔ molecule HACC
-    Query HACC&HDON   ↔ molecule HACC&HDON only
-    Query HACC|HDON   ↔ molecule HDON or HACC
-    Query POSC        ↔ molecule POSC
-    Query NEGC        ↔ molecule NEGC
-    Query EXCL        ↔ never (penalises overlap separately)
-    Query UNDEF       ↔ any molecule type
+    Query AROM           ↔ molecule AROM
+    Query LIPO           ↔ molecule LIPO
+    Query AROM_OR_LIPO   ↔ molecule AROM or LIPO
+    Query HDON           ↔ molecule HDON
+    Query HACC           ↔ molecule HACC
+    Query HACC_AND_HDON  ↔ molecule HACC_AND_HDON only
+    Query HACC_OR_HDON   ↔ molecule HDON or HACC
+    Query POSC           ↔ molecule POSC
+    Query NEGC           ↔ molecule NEGC
+    Query EXCL           ↔ never (penalises overlap separately)
+    Query UNDEF          ↔ any molecule type
 """
 
 from __future__ import annotations

@@ -10,8 +10,8 @@ from tqdm import tqdm
 from pypharao import *
 
 SMI_FILE = Path(__file__).resolve().parent / "datasets" / "compounds_10k.smi"
-MAX_COMPOUNDS = None  # None = use the whole file
-
+#MAX_COMPOUNDS = None  # None = use the whole file
+MAX_COMPOUNDS = 500
 
 # ------------------------------------------------------------
 # Build a query pharmacophore from a 3D structure of phenol
@@ -35,6 +35,8 @@ searcher = PharmacophoreSearch(query)
 print("\nSelf-screen:")
 print_match_results(searcher.screen(ref_mol, progress=False))
 
+import sys
+sys.exit()
 
 # ------------------------------------------------------------
 # Build 3D conformers for a SMILES dataset

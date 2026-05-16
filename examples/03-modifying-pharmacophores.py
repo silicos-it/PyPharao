@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Modify a query pharmacophore by hand to introduce AROM|LIPO and HACC|HDON points.
+"""Modify a query pharmacophore by hand to introduce AROM_OR_LIPO and HACC_OR_HDON points.
 
 Notes
 -----
-``HACC|HDON`` (query) only matches ``HDON`` or ``HACC`` in a molecule (per the
-matching table); it does **not** match the auto-merged ``HACC&HDON`` compound
-type. When the query carries ``HACC|HDON`` points, configure both perceptions
-to skip the ``HACC&HDON`` merge so the molecule keeps the elementary
-``HDON``/``HACC`` sites the query expects.
+``HACC_OR_HDON`` (query) only matches ``HDON`` or ``HACC`` in a molecule (per
+the matching table); it does **not** match the auto-merged ``HACC_AND_HDON``
+compound type. When the query carries ``HACC_OR_HDON`` points, configure both
+perceptions to skip the ``HACC_AND_HDON`` merge so the molecule keeps the
+elementary ``HDON``/``HACC`` sites the query expects.
 """
 
 from rdkit import Chem
@@ -30,7 +30,7 @@ for p in query:
     print(f"  {p.type.value:<10} center={p.center}")
 
 
-# ----- Convert AROM → AROM|LIPO -----
+# ----- Convert AROM → AROM_OR_LIPO -----
 for i, p in enumerate(query):
     if p.type == PointType.AROM:
         query.set_point(
@@ -42,11 +42,11 @@ for i, p in enumerate(query):
                 normal=p.normal,
             ),
         )
-        print(f"\nConverted point {i}: AROM → AROM|LIPO")
+        print(f"\nConverted point {i}: AROM → AROM_OR_LIPO")
         break
 
 
-# ----- Collapse the phenol HDON+HACC pair into a single HACC|HDON point -----
+# ----- Collapse the phenol HDON+HACC pair into a single HACC_OR_HDON point -----
 hdon_idx = next((i for i, p in enumerate(query) if p.type == PointType.HDON), None)
 hacc_idx = next((i for i, p in enumerate(query) if p.type == PointType.HACC), None)
 if hdon_idx is not None and hacc_idx is not None:
@@ -61,7 +61,7 @@ if hdon_idx is not None and hacc_idx is not None:
             sigma=DEFAULT_SIGMA[PointType.HACC_OR_HDON],
         )
     )
-    print("Replaced HDON+HACC pair with HACC|HDON")
+    print("Replaced HDON+HACC pair with HACC_OR_HDON")
 
 
 # ----- Append an EXCL sphere above the ring plane -----

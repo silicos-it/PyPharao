@@ -32,7 +32,8 @@ from .pharmacophore import (
 
 
 # Two HACC and HDON sites are considered co-located and merged into a single
-# HACC&HDON point when their squared distance is below this threshold.
+# HACC_AND_HDON point when their squared distance is below this threshold
+# (≈ 0.01 Å, i.e. effectively the same atom).
 _HACC_HDON_MERGE_DIST_SQ = 0.0001
 
 
@@ -314,6 +315,14 @@ def _lipo_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
     for ring in ri.AtomRings():
         if len(ring) > 7:
             continue
+        # Aromatic rings are already reported as AROM by `_arom_points`; skip
+        # them here so the same ring is never emitted as both AROM and LIPO.
+        # Still drop the ring atoms from `atom_set` so the single-atom LIPO
+        # loop below does not reconsider them.
+        if all(mol.GetAtomWithIdx(a).GetIsAromatic() for a in ring):
+            for aidx in ring:
+                atom_set.discard(aidx)
+            continue
         lipo_sum = 0.0
         cx = cy = cz = 0.0
         for aidx in ring:
@@ -368,11 +377,11 @@ def _lipo_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
 
 
 def _merge_hacc_hdon(points: list[PharmacophorePoint]) -> list[PharmacophorePoint]:
-    """Collapse co-located HACC + HDON sites into a single HACC&HDON point.
+    """Collapse co-located HACC + HDON sites into a single HACC_AND_HDON point.
 
     Iterates over pairs; whenever a donor and acceptor sit at the same atom
     (squared distance below :data:`_HACC_HDON_MERGE_DIST_SQ`) both are removed
-    and replaced with one ``HACC&HDON`` point at that location.
+    and replaced with one ``HACC_AND_HDON`` point at that location.
     """
     used: set[int] = set()
     out: list[PharmacophorePoint] = []
@@ -498,8 +507,10 @@ def query_pharmacophore_from_molecule(
     """Build a :class:`QueryPharmacophore` from a 3D RDKit molecule.
 
     The user typically refines the result manually (e.g. converting an ``AROM``
-    point to ``AROM|LIPO`` or an ``HDON``/``HACC`` pair to ``HACC|HDON``); the
-    auto-perception emits only the seven elementary plus ``HACC&HDON`` types.
+    point to ``AROM_OR_LIPO`` or an ``HDON``/``HACC`` pair to ``HACC_OR_HDON``);
+    the auto-perception emits only the seven elementary plus ``HACC_AND_HDON``
+    types. Aromatic rings are reported as ``AROM`` only — :func:`_lipo_points`
+    skips them so the same ring is never emitted as both ``AROM`` and ``LIPO``.
     """
     _require_conformer(mol)
     perception = perception or QueryPharmacophorePerception()

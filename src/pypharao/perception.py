@@ -99,9 +99,12 @@ class PharmacophorePerception:
 class QueryPharmacophorePerception(PharmacophorePerception):
     """Perception flags for :class:`QueryPharmacophore`.
 
-    Auto-perception can emit ``AROM, LIPO, HDON, HACC, HACC&HDON, POSC, NEGC``.
-    ``EXCL``, ``UNDEF``, ``AROM|LIPO`` and ``HACC|HDON`` are not auto-perceived
-    and must be added manually after the query is built.
+    Auto-perception emits ``AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC``.
+    The query-only ``AROM_OR_LIPO`` and ``HACC_OR_HDON`` compound types — along
+    with ``EXCL`` and ``UNDEF`` — are never produced by auto-perception; they
+    are introduced by hand by editing the resulting :class:`QueryPharmacophore`
+    (typically by converting an ``AROM`` or ``LIPO`` point to ``AROM_OR_LIPO``
+    and an ``HDON``/``HACC`` pair to ``HACC_OR_HDON``).
     """
 
     allowed_types: ClassVar[frozenset[PointType]] = frozenset(
@@ -121,7 +124,7 @@ class QueryPharmacophorePerception(PharmacophorePerception):
 class MoleculePharmacophorePerception(PharmacophorePerception):
     """Perception flags for :class:`MoleculePharmacophore`.
 
-    Auto-perception can emit ``AROM, LIPO, HDON, HACC, HACC&HDON, POSC, NEGC``.
+    Auto-perception can emit ``AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC``.
     """
 
     allowed_types: ClassVar[frozenset[PointType]] = frozenset(
