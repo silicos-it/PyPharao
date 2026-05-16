@@ -244,6 +244,17 @@ class Pharmacophore:
         self._check_type(point)
         self._points[idx] = point
 
+    def update_point(self, idx: int, **changes: Any) -> None:
+        """Replace the point at ``idx`` with a copy whose selected fields are updated.
+
+        Convenience wrapper for
+        ``self.set_point(idx, self[idx].replace(**changes))``. Accepts the same
+        keyword arguments as :meth:`PharmacophorePoint.replace` (``type``,
+        ``center``, ``sigma``, ``normal``). Validation against the subclass's
+        ``allowed_types`` still applies.
+        """
+        self.set_point(idx, self._points[idx].replace(**changes))
+
     def remove_point(self, idx: int) -> None:
         """Remove the point at ``idx``."""
         del self._points[idx]

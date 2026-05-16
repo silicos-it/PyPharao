@@ -55,3 +55,38 @@ def test_molecule_pharmacophore_rejects_excl():
 
 def test_pharmacophorepoint_type_nested_alias():
     assert PharmacophorePoint.Type is PointType
+
+
+def test_update_point_changes_type_in_place():
+    q = QueryPharmacophore(name="upd")
+    q.add_point(
+        PharmacophorePoint(
+            type=PointType.AROM, center=(1.0, 2.0, 3.0), normal=(0.0, 0.0, 1.0)
+        )
+    )
+
+    q.update_point(0, type=PointType.AROM_OR_LIPO)
+
+    assert q[0].type == PointType.AROM_OR_LIPO
+    assert q[0].center == (1.0, 2.0, 3.0)
+    assert q[0].normal == (0.0, 0.0, 1.0)
+
+
+def test_update_point_can_change_multiple_fields():
+    q = QueryPharmacophore()
+    q.add_point(PharmacophorePoint(type=PointType.HDON, center=(0.0, 0.0, 0.0)))
+
+    q.update_point(0, center=(1.0, 2.0, 3.0), sigma=1.25)
+
+    assert q[0].center == (1.0, 2.0, 3.0)
+    assert q[0].sigma == 1.25
+    assert q[0].type == PointType.HDON
+
+
+def test_update_point_enforces_subclass_allowed_types():
+    m = MoleculePharmacophore()
+    m.add_point(PharmacophorePoint(type=PointType.HACC, center=(0.0, 0.0, 0.0)))
+
+    with pytest.raises(ValueError, match="EXCL"):
+        m.update_point(0, type=PointType.EXCL)
+    assert m[0].type == PointType.HACC
