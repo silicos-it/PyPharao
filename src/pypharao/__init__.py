@@ -1,53 +1,80 @@
 """PyPharao: pharmacophore model and Pharao-style 3D Gaussian matching."""
 
 from .alignment import Alignment, position_molecule_coords, position_pharmacophore
+from .match_report import (
+    print_match_results,
+    sort_match_results,
+    write_hits_sdf,
+)
+from .perception import (
+    MoleculePharmacophorePerception,
+    PharmacophorePerception,
+    QueryPharmacophorePerception,
+)
 from .pharmacophore import (
-    FUNC_HAS_NORMAL,
-    FUNC_SIGMA,
-    FuncGroup,
+    DEFAULT_SIGMA,
+    TYPE_DESCRIPTIONS,
+    TYPE_HAS_NORMAL,
+    MoleculePharmacophore,
     Pharmacophore,
     PharmacophorePoint,
+    PointType,
+    QueryPharmacophore,
     cosine_normals,
-    default_alpha,
     distance,
 )
 from .quaternion_math import quat_to_rotation_matrix
-from .match_report import print_match_results, sort_match_results
-from .search import MatchResult, PharmacophoreSearch, count_query_features
+from .search import (
+    MatchResult,
+    PharmacophoreSearch,
+    count_matchable_query_points,
+    matched_query_features,
+)
 from .volume import volume_overlap
-
-from .perception_options import PerceptionOptions, perception_options_from_pharmacophore
 
 try:
     from .rdkit_perception import (
-        pharmacophore_from_molecule,
-        pharmacophore_from_rdkit,
+        molecule_pharmacophore_from_molecule,
+        query_pharmacophore_from_molecule,
+        query_pharmacophore_from_protein,
     )
 except ImportError:
-    pharmacophore_from_molecule = None  # type: ignore[misc, assignment]
-    pharmacophore_from_rdkit = None  # type: ignore[misc, assignment]
+    molecule_pharmacophore_from_molecule = None  # type: ignore[misc, assignment]
+    query_pharmacophore_from_molecule = None  # type: ignore[misc, assignment]
+
+    def query_pharmacophore_from_protein(*args, **kwargs):  # type: ignore[no-redef]
+        raise NotImplementedError(
+            "query_pharmacophore_from_protein is not implemented yet."
+        )
+
 
 __all__ = [
     "Alignment",
-    "FUNC_HAS_NORMAL",
-    "FUNC_SIGMA",
-    "FuncGroup",
+    "DEFAULT_SIGMA",
     "MatchResult",
-    "print_match_results",
-    "sort_match_results",
-    "PerceptionOptions",
-    "perception_options_from_pharmacophore",
+    "MoleculePharmacophore",
+    "MoleculePharmacophorePerception",
     "Pharmacophore",
+    "PharmacophorePerception",
     "PharmacophorePoint",
     "PharmacophoreSearch",
-    "count_query_features",
+    "PointType",
+    "QueryPharmacophore",
+    "QueryPharmacophorePerception",
+    "TYPE_DESCRIPTIONS",
+    "TYPE_HAS_NORMAL",
     "cosine_normals",
-    "default_alpha",
+    "count_matchable_query_points",
     "distance",
-    "pharmacophore_from_molecule",
-    "pharmacophore_from_rdkit",
+    "matched_query_features",
+    "molecule_pharmacophore_from_molecule",
     "position_molecule_coords",
     "position_pharmacophore",
+    "print_match_results",
     "quat_to_rotation_matrix",
+    "query_pharmacophore_from_molecule",
+    "query_pharmacophore_from_protein",
+    "sort_match_results",
     "volume_overlap",
+    "write_hits_sdf",
 ]

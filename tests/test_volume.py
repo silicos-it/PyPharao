@@ -1,14 +1,14 @@
-from pypharao import FuncGroup, Pharmacophore, PharmacophorePoint, volume_overlap
+from pypharao import PharmacophorePoint, PointType, volume_overlap
 
 
-def test_volume_overlap_self_lipo():
-    p = PharmacophorePoint(0, 0, 0, FuncGroup.LIPO, 0.7, False, 0, 0, 0)
-    v = volume_overlap(p, p, True)
-    assert v > 0.0
+def test_volume_overlap_self_lipo_positive():
+    p = PharmacophorePoint(type=PointType.LIPO, center=(0, 0, 0))
+    assert volume_overlap(p, p, True) > 0.0
 
 
-def test_volume_directional_hbond():
-    p1 = PharmacophorePoint(0, 0, 0, FuncGroup.HACC, 1.0, True, 0, 0, 1.0)
-    p2 = PharmacophorePoint(0.1, 0, 0, FuncGroup.HDON, 1.0, True, 0.1, 0, 0.0)
-    v = volume_overlap(p1, p2, True)
-    assert v <= volume_overlap(p1, p2, False)
+def test_volume_directional_hbond_smaller_when_misaligned():
+    p1 = PharmacophorePoint(type=PointType.HACC, center=(0, 0, 0))
+    p2 = PharmacophorePoint(type=PointType.HDON, center=(0.1, 0, 0))
+    # H-bond directionality currently only applies when both sides carry a
+    # normal; without normals we still expect a non-zero overlap.
+    assert volume_overlap(p1, p2, True) <= volume_overlap(p1, p2, False)

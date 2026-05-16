@@ -1,9 +1,10 @@
-"""Human-readable reports for pharmacophore screen results."""
+"""Human-readable reports and SDF output for pharmacophore screen results."""
 
 from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Literal, TextIO
 
 from .pharmacophore import Pharmacophore
@@ -22,6 +23,7 @@ SortKey = Literal[
 
 _TABLE_HEADERS = [
     "index",
+    "conf_id",
     "ref_volume",
     "db_volume",
     "overlap_volume",
@@ -35,6 +37,18 @@ _TABLE_HEADERS = [
     "aligned_mol",
 ]
 
+_SDF_TAGS: list[str] = [
+    "index",
+    "conf_id",
+    "tanimoto",
+    "tversky_ref",
+    "tversky_db",
+    "overlap_volume",
+    "excl_volume",
+    "ref_volume",
+    "db_volume",
+]
+
 
 def _format_mapping(mapping: Sequence[tuple[int, int]]) -> str:
     if not mapping:
@@ -43,10 +57,10 @@ def _format_mapping(mapping: Sequence[tuple[int, int]]) -> str:
 
 
 def _pharmacophore_summary(ph: Pharmacophore) -> str:
-    if not ph.points:
+    pts = list(ph)
+    if not pts:
         return "[]"
-    funcs = ",".join(p.func.value for p in ph.points)
-    return f"[{funcs}]"
+    return "[" + ",".join(p.type.value for p in pts) + "]"
 
 
 def _aligned_mol_smiles(mol: Any) -> str:
@@ -63,6 +77,7 @@ def _aligned_mol_smiles(mol: Any) -> str:
 def _result_row(index: int, hit: MatchResult) -> list[str]:
     return [
         str(index),
+        str(hit.conf_id),
         f"{hit.ref_volume:.2f}",
         f"{hit.db_volume:.2f}",
         f"{hit.overlap_volume:.2f}",
@@ -83,21 +98,12 @@ def sort_match_results(
     sort: SortOrder = "descending",
     key: SortKey = "tanimoto",
 ) -> list[tuple[int, MatchResult]]:
-    """Sort screen hits by a numeric ``MatchResult`` field.
+    """Sort screen hits by a numeric :class:`MatchResult` field.
 
-    ``matches`` is the ``[(index, MatchResult), ...]`` list from
-    ``PharmacophoreSearch.screen()``. Returns a new list; the input is unchanged.
+    Returns a new list; the input is not modified.
     """
     reverse = sort == "descending"
     return sorted(matches, key=lambda item: getattr(item[1], key), reverse=reverse)
-
-
-def _normalize_hits(
-    results: MatchResult | list[tuple[int, MatchResult]],
-) -> list[tuple[int, MatchResult]]:
-    if isinstance(results, MatchResult):
-        return [(0, results)]
-    return list(results)
 
 
 def _print_table(
@@ -112,34 +118,27 @@ def _print_table(
 
 
 def print_match_results(
-    results: MatchResult | list[tuple[int, MatchResult]] | None,
+    results: list[tuple[int, MatchResult]],
     *,
     limit: int | None = None,
     file: TextIO | None = None,
 ) -> None:
-    """Print a tab-separated summary of one or more screen hits.
+    """Print a tab-separated summary of screen hits.
 
-    The first row lists column headers; each following row is one molecule.
-    Accepts a single ``MatchResult``, a batch ``[(index, MatchResult), ...]``
-    from ``PharmacophoreSearch.screen()``, or ``None`` when there is no hit.
-
-    When ``limit`` is set, at most that many hit rows are printed (after any
-    sorting applied by the caller).
+    Expects the ``list[tuple[int, MatchResult]]`` returned by
+    :meth:`pypharao.PharmacophoreSearch.screen`. Prints ``No hits.`` when the
+    list is empty.
     """
     out = file if file is not None else sys.stdout
 
     if limit is not None and limit < 0:
         raise ValueError("limit must be >= 0")
 
-    if results is None:
-        print("No match.", file=out)
-        return
-
-    hits = _normalize_hits(results)
-    if not hits:
+    if not results:
         print("No hits.", file=out)
         return
 
+    hits = list(results)
     if limit is not None:
         total = len(hits)
         hits = hits[:limit]
@@ -148,3 +147,49 @@ def print_match_results(
 
     rows = [_result_row(index, hit) for index, hit in hits]
     _print_table(_TABLE_HEADERS, rows, file=out)
+
+
+def write_hits_sdf(
+    hits: list[tuple[int, MatchResult]],
+    path: str | Path,
+) -> int:
+    """Write each hit's aligned molecule to a multi-record SDF file.
+
+    SDF tags written per record: ``index``, ``conf_id``, ``tanimoto``,
+    ``tversky_ref``, ``tversky_db``, ``overlap_volume``, ``excl_volume``,
+    ``ref_volume`` and ``db_volume``. Hits with no aligned molecule (e.g. a
+    pre-built molecule pharmacophore with no parent ``Chem.Mol``) are skipped
+    with a one-line warning.
+
+    Returns the number of records written.
+    """
+    try:
+        from rdkit import Chem
+    except ImportError as exc:
+        raise ImportError(
+            "write_hits_sdf requires RDKit (pip install rdkit)"
+        ) from exc
+
+    path = Path(path)
+    written = 0
+    with Chem.SDWriter(str(path)) as writer:
+        for index, hit in hits:
+            mol = hit.aligned_mol
+            if mol is None:
+                print(
+                    f"write_hits_sdf: skipping index {index} (no aligned molecule)",
+                    file=sys.stderr,
+                )
+                continue
+            mol.SetProp("index", str(index))
+            mol.SetProp("conf_id", str(hit.conf_id))
+            mol.SetProp("tanimoto", f"{hit.tanimoto:.6f}")
+            mol.SetProp("tversky_ref", f"{hit.tversky_ref:.6f}")
+            mol.SetProp("tversky_db", f"{hit.tversky_db:.6f}")
+            mol.SetProp("overlap_volume", f"{hit.overlap_volume:.6f}")
+            mol.SetProp("excl_volume", f"{hit.excl_volume:.6f}")
+            mol.SetProp("ref_volume", f"{hit.ref_volume:.6f}")
+            mol.SetProp("db_volume", f"{hit.db_volume:.6f}")
+            writer.write(mol)
+            written += 1
+    return written

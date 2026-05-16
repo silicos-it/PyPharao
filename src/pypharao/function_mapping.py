@@ -1,46 +1,64 @@
-"""Enumerate pharmacophore feature maps (`functionMapping.cpp`)."""
+"""Enumerate pharmacophore feature maps (`functionMapping.cpp`).
+
+Matching is directional: the ``ref`` (query) point sets which database
+(molecule) types are compatible. The full table — also reflected in
+``functions_compatible`` — is::
+
+    Query AROM        ↔ molecule AROM
+    Query LIPO        ↔ molecule LIPO
+    Query AROM|LIPO   ↔ molecule AROM or LIPO
+    Query HDON        ↔ molecule HDON
+    Query HACC        ↔ molecule HACC
+    Query HACC&HDON   ↔ molecule HACC&HDON only
+    Query HACC|HDON   ↔ molecule HDON or HACC
+    Query POSC        ↔ molecule POSC
+    Query NEGC        ↔ molecule NEGC
+    Query EXCL        ↔ never (penalises overlap separately)
+    Query UNDEF       ↔ any molecule type
+"""
 
 from __future__ import annotations
 
 import math
 
 from .constants import GCI, GCI2, PI
-from .pharmacophore import FuncGroup, Pharmacophore, distance
+from .pharmacophore import Pharmacophore, PointType, distance
 
-# Database types matchable by hybrid query features (OR semantics).
-_HYBL_DB = frozenset({FuncGroup.AROM, FuncGroup.LIPO, FuncGroup.HYBL})
-_HYBH_DB = frozenset({FuncGroup.HDON, FuncGroup.HACC, FuncGroup.HYBH})
+_AROM_OR_LIPO_DB = frozenset({PointType.AROM, PointType.LIPO})
+_HACC_OR_HDON_DB = frozenset({PointType.HDON, PointType.HACC})
+_ANY_MOL_TYPE = frozenset(
+    {
+        PointType.AROM,
+        PointType.LIPO,
+        PointType.HDON,
+        PointType.HACC,
+        PointType.HACC_AND_HDON,
+        PointType.POSC,
+        PointType.NEGC,
+    }
+)
 
 
-def database_types_for_query(ref: FuncGroup) -> frozenset[FuncGroup]:
+def database_types_for_query(ref: PointType) -> frozenset[PointType]:
     """Molecule feature types that may satisfy a query point of type ``ref``."""
-    if ref in (FuncGroup.EXCL, FuncGroup.UNDEF):
+    if ref == PointType.EXCL:
         return frozenset()
-    if ref == FuncGroup.HYBL:
-        return _HYBL_DB
-    if ref == FuncGroup.HYBH:
-        return _HYBH_DB
-    return frozenset({ref})
+    if ref == PointType.UNDEF:
+        return _ANY_MOL_TYPE
+    if ref == PointType.AROM_OR_LIPO:
+        return _AROM_OR_LIPO_DB
+    if ref == PointType.HACC_OR_HDON:
+        return _HACC_OR_HDON_DB
+    if ref == PointType.HACC_AND_HDON:
+        return frozenset({PointType.HACC_AND_HDON})
+    if ref in _ANY_MOL_TYPE:
+        return frozenset({ref})
+    return frozenset()
 
 
-def functions_compatible(ref: FuncGroup, db: FuncGroup) -> bool:
-    """Return whether a reference (query) feature may map to a database feature.
-
-    Matching is directional: ``ref`` is the pharmacophore query, ``db`` is the
-    molecule/database feature. Only the pairings below are allowed; there are no
-    other cross-type matches (e.g. query AROM does not match database HYBL).
-
-    * AROM, LIPO, HDON, HACC, POSC, NEGC — same type only
-    * HYBL — database AROM, LIPO, or HYBL
-    * HYBH — database HDON, HACC, or HYBH
-    """
-    if ref == db:
-        return True
-    if ref == FuncGroup.HYBL:
-        return db in _HYBL_DB
-    if ref == FuncGroup.HYBH:
-        return db in _HYBH_DB
-    return False
+def functions_compatible(ref: PointType, db: PointType) -> bool:
+    """Return whether a query feature ``ref`` may map to a database feature ``db``."""
+    return db in database_types_for_query(ref)
 
 
 class FunctionMapping:
@@ -55,10 +73,10 @@ class FunctionMapping:
         self._has_next = True
 
         for i in range(len(ref)):
-            if ref[i].func == FuncGroup.EXCL:
+            if ref[i].type == PointType.EXCL:
                 continue
             for j in range(len(db)):
-                if functions_compatible(ref[i].func, db[j].func):
+                if functions_compatible(ref[i].type, db[j].type):
                     self._ref_index.append(i)
                     self._db_index.append(j)
 
@@ -72,8 +90,8 @@ class FunctionMapping:
         self._match_map[2] = []
 
         for i in range(n - 1):
-            v1 = GCI * (PI / ref[self._ref_index[i]].alpha) ** 1.5
-            v2 = GCI * (PI / db[self._db_index[i]].alpha) ** 1.5
+            v1 = GCI * (PI / ref[self._ref_index[i]].sigma) ** 1.5
+            v2 = GCI * (PI / db[self._db_index[i]].sigma) ** 1.5
             for j in range(i + 1, n):
                 if self._ref_index[i] == self._ref_index[j] or self._db_index[i] == self._db_index[j]:
                     continue
@@ -84,16 +102,16 @@ class FunctionMapping:
                 rc, rd = ref[self._ref_index[j]], db[self._db_index[j]]
                 o1 = (
                     GCI2
-                    * (PI / (ra.alpha + rb.alpha)) ** 1.5
-                    * math.exp(-(ra.alpha * rb.alpha) * d1 / (ra.alpha + rb.alpha))
+                    * (PI / (ra.sigma + rb.sigma)) ** 1.5
+                    * math.exp(-(ra.sigma * rb.sigma) * d1 / (ra.sigma + rb.sigma))
                 )
                 o2 = (
                     GCI2
-                    * (PI / (rc.alpha + rd.alpha)) ** 1.5
-                    * math.exp(-(rc.alpha * rd.alpha) * d1 / (rc.alpha + rd.alpha))
+                    * (PI / (rc.sigma + rd.sigma)) ** 1.5
+                    * math.exp(-(rc.sigma * rd.sigma) * d1 / (rc.sigma + rd.sigma))
                 )
-                v3 = GCI * (PI / rc.alpha) ** 1.5
-                v4 = GCI * (PI / rd.alpha) ** 1.5
+                v3 = GCI * (PI / rc.sigma) ** 1.5
+                v4 = GCI * (PI / rd.sigma) ** 1.5
                 if (o2 / (v3 + v4 - o2) > epsilon) or (o1 / (v1 + v2 - o1) > epsilon):
                     self._match_map[2].append([i, j])
 

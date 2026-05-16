@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .constants import GCI, GCI2, PI
-from .pharmacophore import FuncGroup, Pharmacophore
+from .pharmacophore import Pharmacophore, PointType
 from .quaternion_math import (
     inverse_hessian,
     normalize_quaternion,
@@ -86,9 +86,18 @@ def normal_contribution(
 class _AlignPoint:
     point: np.ndarray
     normal: np.ndarray
-    func: FuncGroup
-    alpha: float
+    type: PointType
+    sigma: float
     has_normal: bool
+
+
+_AROMATIC_LIKE = {PointType.AROM, PointType.AROM_OR_LIPO}
+_HBOND_LIKE = {
+    PointType.HACC,
+    PointType.HDON,
+    PointType.HACC_AND_HDON,
+    PointType.HACC_OR_HDON,
+}
 
 
 class Alignment:
@@ -106,12 +115,12 @@ class Alignment:
         for ri, di in pairs:
             pr = ref[ri]
             pd = db[di]
-            if pr.func == FuncGroup.EXCL:
+            if pr.type == PointType.EXCL:
                 self._nbr_excl += 1
                 continue
             self._nbr_points += 1
-            v1 = GCI * (PI / pr.alpha) ** 1.5
-            v2 = GCI * (PI / pd.alpha) ** 1.5
+            v1 = GCI * (PI / pr.sigma) ** 1.5
+            v2 = GCI * (PI / pd.sigma) ** 1.5
             V1 += v1
             self._ref_center += v1 * np.array([pr.x, pr.y, pr.z], dtype=float)
             V2 += v2
@@ -133,9 +142,9 @@ class Alignment:
             p2p = np.array([pd.x - self._db_center[0], pd.y - self._db_center[1], pd.z - self._db_center[2]])
             p2n = np.array([pd.nx - pd.x, pd.ny - pd.y, pd.nz - pd.z], dtype=float)
 
-            if pr.func != FuncGroup.EXCL:
-                v1 = GCI * (PI / pr.alpha) ** 1.5
-                v2 = GCI * (PI / pd.alpha) ** 1.5
+            if pr.type != PointType.EXCL:
+                v1 = GCI * (PI / pr.sigma) ** 1.5
+                v2 = GCI * (PI / pd.sigma) ** 1.5
                 x, y, z = p1p[0], p1p[1], p1p[2]
                 mass1[0, 0] += v1 * x * x
                 mass1[0, 1] += v1 * x * y
@@ -152,10 +161,10 @@ class Alignment:
                 mass2[2, 2] += v2 * z * z
 
             self._ref_map.append(
-                _AlignPoint(p1p.copy(), p1n.copy(), pr.func, pr.alpha, pr.has_normal)
+                _AlignPoint(p1p.copy(), p1n.copy(), pr.type, pr.sigma, pr.has_normal)
             )
             self._db_map.append(
-                _AlignPoint(p2p.copy(), p2n.copy(), pd.func, pd.alpha, pd.has_normal)
+                _AlignPoint(p2p.copy(), p2n.copy(), pd.type, pd.sigma, pd.has_normal)
             )
 
         if self._nbr_points > 0 and V1 > 1e-15:
@@ -256,12 +265,12 @@ class Alignment:
                     Ak = self._aka[i]
                     Aq = Ak @ rotor
                     qAq = float(np.dot(Aq, rotor))
-                    v = GCI2 * (PI / (self._ref_map[i].alpha + self._db_map[i].alpha)) ** 1.5 * math.exp(
+                    v = GCI2 * (PI / (self._ref_map[i].sigma + self._db_map[i].sigma)) ** 1.5 * math.exp(
                         -qAq
                     )
                     c = 1.0
-                    rf = self._ref_map[i].func
-                    df = self._db_map[i].func
+                    rf = self._ref_map[i].type
+                    df = self._db_map[i].type
                     hn1 = self._ref_map[i].has_normal
                     hn2 = self._db_map[i].has_normal
                     n1 = self._ref_map[i].normal
@@ -269,8 +278,8 @@ class Alignment:
 
                     if (
                         use_direction
-                        and rf in (FuncGroup.AROM, FuncGroup.HYBL)
-                        and df in (FuncGroup.AROM, FuncGroup.HYBL)
+                        and rf in _AROMATIC_LIKE
+                        and df in _AROMATIC_LIKE
                         and hn1
                         and hn2
                     ):
@@ -290,8 +299,8 @@ class Alignment:
                         v *= c
                     elif (
                         use_direction
-                        and rf in (FuncGroup.HACC, FuncGroup.HDON, FuncGroup.HYBH)
-                        and df in (FuncGroup.HDON, FuncGroup.HACC, FuncGroup.HYBH)
+                        and rf in _HBOND_LIKE
+                        and df in _HBOND_LIKE
                         and hn1
                         and hn2
                     ):
@@ -305,7 +314,7 @@ class Alignment:
                                     + 2.0 * c * (2.0 * Aq[hi] * Aq[hj] - Ak[hi, hj])
                                 )
                         v *= c
-                    elif rf == FuncGroup.EXCL:
+                    elif rf == PointType.EXCL:
                         v *= -scale
                         for hi in range(4):
                             grad[hi] -= 2.0 * v * Aq[hi]
@@ -338,8 +347,11 @@ class Alignment:
 
 def position_pharmacophore(pharm: Pharmacophore, U: np.ndarray, sol: SolutionInfo) -> None:
     """Transform pharmacophore points in-place (utilities `positionPharmacophore`)."""
+    from .pharmacophore import PharmacophorePoint, TYPE_HAS_NORMAL
+
     rt = sol.rotation2.T
-    for i, p in enumerate(pharm.points):
+    for i in range(len(pharm)):
+        p = pharm[i]
         nrel = np.array([p.nx - p.x, p.ny - p.y, p.nz - p.z], dtype=float)
         pt = np.array([p.x - sol.center2[0], p.y - sol.center2[1], p.z - sol.center2[2]])
         pt = rotate_coord_align(pt, rt)
@@ -349,12 +361,21 @@ def position_pharmacophore(pharm: Pharmacophore, U: np.ndarray, sol: SolutionInf
         nrel = rotate_coord_align(nrel, rt)
         nrel = rotate_coord_util(nrel, U)
         nrel = rotate_coord_align(nrel, sol.rotation1)
-        nx = float(nrel[0] + pt[0])
-        ny = float(nrel[1] + pt[1])
-        nz = float(nrel[2] + pt[2])
-        pharm.points[i] = p.with_fields(
-            x=float(pt[0]), y=float(pt[1]), z=float(pt[2]), nx=nx, ny=ny, nz=nz
-        )
+        new_center = (float(pt[0]), float(pt[1]), float(pt[2]))
+        if TYPE_HAS_NORMAL[p.type]:
+            new_normal = (
+                float(nrel[0] + pt[0]),
+                float(nrel[1] + pt[1]),
+                float(nrel[2] + pt[2]),
+            )
+            new_point = PharmacophorePoint(
+                type=p.type, center=new_center, sigma=p.sigma, normal=new_normal
+            )
+        else:
+            new_point = PharmacophorePoint(
+                type=p.type, center=new_center, sigma=p.sigma
+            )
+        pharm.set_point(i, new_point)
 
 
 def position_molecule_coords(

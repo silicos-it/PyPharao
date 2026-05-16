@@ -1,21 +1,21 @@
 import numpy as np
 
-from pypharao import Alignment, FuncGroup, Pharmacophore, PharmacophorePoint
+from pypharao import (
+    Alignment,
+    PharmacophorePoint,
+    PointType,
+    QueryPharmacophore,
+)
 from pypharao.alignment import SolutionInfo, position_molecule_coords
 from pypharao.quaternion_math import quat_to_rotation_matrix
 
 
 def test_align_identical_two_points():
-    ref = Pharmacophore(
-        points=[
-            PharmacophorePoint(0, 0, 0, FuncGroup.LIPO, 0.7, False, 0, 0, 0),
-            PharmacophorePoint(2, 0, 0, FuncGroup.LIPO, 0.7, False, 0, 0, 0),
-        ]
-    )
+    ref = QueryPharmacophore()
+    ref.add_point(PharmacophorePoint(type=PointType.LIPO, center=(0, 0, 0)))
+    ref.add_point(PharmacophorePoint(type=PointType.LIPO, center=(2, 0, 0)))
     db = ref.copy()
-    pairs = [(0, 0), (1, 1)]
-    al = Alignment(ref, db, pairs)
-    sol = al.align(False)
+    sol = Alignment(ref, db, [(0, 0), (1, 1)]).align(False)
     assert sol.volume > 0.0
 
 
