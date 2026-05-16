@@ -352,6 +352,66 @@ class Pharmacophore:
     def write_phar(self, path: str | Path) -> None:
         Path(path).write_text(self.to_phar_text(), encoding="utf-8")
 
+    def _resolve_mol_name(self, name: str | None) -> str:
+        if name is not None:
+            return name
+        existing = getattr(self, "_name", "") or ""
+        return existing or "pharmacophore"
+
+    def write_sdf(self, path: str | Path, *, name: str | None = None) -> None:
+        """Write this pharmacophore to a single-record SDF file.
+
+        Each pharmacophore feature is rendered as one pseudo-atom via
+        :func:`pypharao.pharmacophore_to_mol`. The SDF carries the same
+        per-feature properties (``types``, ``sigmas``, ``centers``,
+        ``normals``, ``num_features``, ``kind`` and, for named query
+        pharmacophores, ``name``) so the file is self-describing.
+
+        Pass ``name=`` to override the record title; the default is the
+        pharmacophore's own ``name`` (for query pharmacophores) or
+        ``"pharmacophore"``.
+
+        Requires RDKit.
+        """
+        from .match_report import pharmacophore_to_mol
+
+        try:
+            from rdkit import Chem
+        except ImportError as exc:
+            raise ImportError(
+                "Pharmacophore.write_sdf requires RDKit (pip install rdkit)"
+            ) from exc
+
+        mol = pharmacophore_to_mol(self, name=self._resolve_mol_name(name))
+        with Chem.SDWriter(str(Path(path))) as writer:
+            writer.write(mol)
+
+    def write_pdb(self, path: str | Path, *, name: str | None = None) -> None:
+        """Write this pharmacophore to a PDB file.
+
+        Each pharmacophore feature becomes one ``HETATM`` whose residue
+        name encodes the feature type (``ARO``, ``LIP``, ``HDO``,
+        ``HAC``, ``DAC``, ...) — see
+        :func:`pypharao.pharmacophore_to_mol` for the full mapping.
+
+        Pass ``name=`` to override the ``COMPND`` title; the default is
+        the pharmacophore's own ``name`` (for query pharmacophores) or
+        ``"pharmacophore"``.
+
+        Requires RDKit.
+        """
+        from .match_report import pharmacophore_to_mol
+
+        try:
+            from rdkit import Chem
+        except ImportError as exc:
+            raise ImportError(
+                "Pharmacophore.write_pdb requires RDKit (pip install rdkit)"
+            ) from exc
+
+        mol = pharmacophore_to_mol(self, name=self._resolve_mol_name(name))
+        Path(path).write_text(Chem.MolToPDBBlock(mol), encoding="utf-8")
+
     @classmethod
     def from_phar_text(cls, text: str) -> Pharmacophore:
         lines = [ln.strip() for ln in text.splitlines() if not ln.startswith("#")]

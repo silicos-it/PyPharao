@@ -96,6 +96,8 @@ print("Pharmacophore 1")
 hits = searcher_1.screen(prepared, progress=True)
 sorted_hits = sort_match_results(hits, sort="descending", key="tanimoto")
 print_match_results(sorted_hits, limit=10)
+write_hits_sdf(sorted_hits[:10], "top_hits_ph_1.sdf", pharmacophore=pharmacophore_1)
+write_hits_pdb(sorted_hits[:10], "top_hits_ph_1.pdb", pharmacophore=pharmacophore_1)
 print()
 
 # Pharmacophore 2
@@ -103,4 +105,6 @@ print("Pharmacophore 2")
 hits = searcher_2.screen(prepared, progress=True)
 sorted_hits = sort_match_results(hits, sort="descending", key="tanimoto")
 print_match_results(sorted_hits, limit=10)
-print()
+write_hits_sdf(sorted_hits[:10], "top_hits_ph_2.sdf", pharmacophore=pharmacophore_2)
+write_hits_pdb(sorted_hits[:10], "top_hits_ph_2.pdb", pharmacophore=pharmacophore_2)
+

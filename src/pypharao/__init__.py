@@ -2,8 +2,10 @@
 
 from .alignment import Alignment, position_molecule_coords, position_pharmacophore
 from .match_report import (
+    pharmacophore_to_mol,
     print_match_results,
     sort_match_results,
+    write_hits_pdb,
     write_hits_sdf,
 )
 from .perception import (
@@ -68,6 +70,7 @@ __all__ = [
     "distance",
     "matched_query_features",
     "molecule_pharmacophore_from_molecule",
+    "pharmacophore_to_mol",
     "position_molecule_coords",
     "position_pharmacophore",
     "print_match_results",
@@ -76,5 +79,6 @@ __all__ = [
     "query_pharmacophore_from_protein",
     "sort_match_results",
     "volume_overlap",
+    "write_hits_pdb",
     "write_hits_sdf",
 ]

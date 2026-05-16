@@ -236,6 +236,15 @@ The tables below list everything available on a `Pharmacophore` (and its `QueryP
 | `from_phar_text(text)` *(classmethod)* | parse a `.phar` string |
 | `read_phar(path)` *(classmethod)* | read a `.phar` file |
 
+**SDF / PDB I/O (requires RDKit, export only)**
+
+| Method | Direction |
+|---|---|
+| `write_sdf(path, *, name=None)` | write a single-record SDF (one pseudo-atom per feature, plus per-mol properties `kind`, `name`, `num_features`, `types`, `sigmas`, `centers`, `normals`) |
+| `write_pdb(path, *, name=None)` | write a PDB with one `HETATM` per feature; the residue name encodes the feature type (`ARO`, `LIP`, `HDO`, `HAC`, `DAC`, ...) |
+
+Both methods reuse `pharmacophore_to_mol` so the format matches what the multi-record [`write_hits_sdf` / `write_hits_pdb`](#writing-hits-to-an-sdf-or-pdb-file) writers produce. SDF/PDB are export-only; round-trip back to a `Pharmacophore` is not supported (use JSON or `.phar` for that).
+
 **`QueryPharmacophore` extras**
 
 | Member | Kind |
@@ -356,7 +365,7 @@ searcher = PharmacophoreSearch(query, perception=opts)  # custom molecule percep
 
 | Method | Purpose |
 |---|---|
-| `screen(mols, *, conformations='all', min_matches=None, keep='best', metric='tanimoto', n_jobs=0, progress=True)` | The single public entry point. See [`screen()` parameters](#screen-parameters) below for the full breakdown. Returns `list[tuple[int, MatchResult]]`. |
+| `screen(mols, *, conformations='all', min_matches=0, keep='best', metric='tanimoto', n_jobs=0, progress=True)` | The single public entry point. See [`screen()` parameters](#screen-parameters) below for the full breakdown. Returns `list[tuple[int, MatchResult]]`. |
 
 **Private / internal methods** (prefixed with `_`, not part of the supported API)
 
@@ -381,7 +390,7 @@ searcher = PharmacophoreSearch(query, perception=opts)  # custom molecule percep
 | `MatchResult` | Dataclass returned by `screen()`. See [§5 *Analysing the results*](#5-analysing-the-results). |
 | `sort_match_results(hits, sort=..., key=...)` | Sort hits by any metric. |
 | `print_match_results(hits, limit=...)` | Pretty-print hits as a table. |
-| `count_matchable_query_points(query)` | Default for `min_matches`; counts query points other than `EXCL` / `UNDEF`. |
+| `count_matchable_query_points(query)` | Resolved value when `min_matches=0`; counts query points other than `EXCL` / `UNDEF`. |
 
 ### `screen()` parameters
 
@@ -389,7 +398,7 @@ searcher = PharmacophoreSearch(query, perception=opts)  # custom molecule percep
 hits = searcher.screen(
     mols,                       # one Chem.Mol or a list of mols / tuples
     conformations="all",        # 'all' | 'single' | int N
-    min_matches=None,           # default = matchable query points
+    min_matches=0,              # 0 = auto, resolved to matchable query points
     keep="best",                # 'best' (one row per molecule) or 'all'
     metric="tanimoto",          # tie-break for keep='best'
     n_jobs=0,                   # 0 = all CPUs, 1 = sequential
@@ -401,7 +410,7 @@ hits = searcher.screen(
 | ---------------- | ------------- | ------------------------------------------------------------------------------------------------------------ |
 | `mols`           | —             | A single `Chem.Mol`, a list of `Chem.Mol`, or a list of tuples whose last element is a mol (the first element becomes the reported hit index, e.g. `(line_idx, smiles, mol)`). |
 | `conformations`  | `"all"`       | `"all"` iterates every conformer of each molecule; `"single"` uses only the first; a positive `int N` uses the first N. |
-| `min_matches`    | `None`        | Minimum number of query points that must map to a molecule feature for a hit. Defaults to `count_matchable_query_points(query)` (every point that is not `EXCL`). Values < 1 or > the matchable count raise `ValueError`. |
+| `min_matches`    | `0`           | Minimum number of query points that must map to a molecule feature for a hit. A value of `0` (the default) is auto-resolved to `count_matchable_query_points(query)` (every point that is not `EXCL` / `UNDEF`). Negative values or values exceeding the matchable count raise `ValueError`. |
 | `keep`           | `"best"`      | `"best"` keeps the single highest-scoring conformer per molecule; `"all"` keeps every conformer that satisfies `min_matches` (each result records the matching `conf_id`). |
 | `metric`         | `"tanimoto"`  | Tie-breaker for `keep="best"`. One of `tanimoto`, `overlap_volume`, `excl_volume`, `tversky_ref`, `tversky_db`. Maximised, except `excl_volume` which is minimised. |
 | `n_jobs`         | `0`           | Worker processes; `0` uses all CPUs, `1` runs sequentially.                                                  |
@@ -440,13 +449,39 @@ print_match_results(ranked, limit=20)
 
 `sort_match_results(matches, *, sort, key)` returns a new sorted list; `key` is any numeric attribute on `MatchResult`.
 
-### Writing hits to an SDF file
+### Writing hits to an SDF or PDB file
 
 ```python
 n = write_hits_sdf(ranked[:50], "top_hits.sdf")
+n = write_hits_sdf(ranked[:50], "top_hits.sdf", pharmacophore=query)
+
+n = write_hits_pdb(ranked[:50], "top_hits.pdb")
+n = write_hits_pdb(ranked[:50], "top_hits.pdb", pharmacophore=query)
 ```
 
-Each record is the aligned 3D molecule (one conformer) with SDF tags `index`, `conf_id`, `tanimoto`, `tversky_ref`, `tversky_db`, `overlap_volume`, `excl_volume`, `ref_volume`, `db_volume`. Hits without an aligned molecule are skipped with a one-line warning; the call returns the number of records written.
+`write_hits_sdf` writes each aligned hit (one conformer) as a record with SDF tags `index`, `conf_id`, `tanimoto`, `tversky_ref`, `tversky_db`, `overlap_volume`, `excl_volume`, `ref_volume`, `db_volume`. `write_hits_pdb` writes each hit as a separate `MODEL` block in a single PDB file, terminated by an `END`.
+
+When `pharmacophore=` is supplied, the pharmacophore is rendered (one pseudo-atom per feature) and prepended as the **first** record of the output file. Aligned hit molecules live in the query coordinate frame, so passing the query pharmacophore here produces a single SDF / PDB that overlays the query on top of the aligned hits.
+
+The pseudo-atom convention (configurable via `pharmacophore_to_mol`):
+
+| `PointType`     | Element | PDB residue name |
+| --------------- | ------- | ---------------- |
+| `AROM`          | C       | `ARO`            |
+| `LIPO`          | C       | `LIP`            |
+| `AROM_OR_LIPO`  | C       | `AOL`            |
+| `HDON`          | N       | `HDO`            |
+| `HACC`          | O       | `HAC`            |
+| `HACC_AND_HDON` | S       | `DAC`            |
+| `HACC_OR_HDON`  | S       | `DAO`            |
+| `POSC`          | Na      | `POS`            |
+| `NEGC`          | Cl      | `NEG`            |
+| `EXCL`          | F       | `EXC`            |
+| `UNDEF`         | He      | `UND`            |
+
+Both writers skip hits with no aligned molecule (one-line warning to `stderr`) and return the total number of records / `MODEL`s written, including the pharmacophore record when one was passed in.
+
+`pharmacophore_to_mol(ph, *, name="pharmacophore")` is also exported in case you want to embed a pharmacophore in your own RDKit pipelines (it returns a `Chem.Mol` with one disconnected pseudo-atom per feature, plus per-mol SDF properties `kind`, `name`, `num_features`, `types`, `sigmas`, `centers`, `normals`).
 
 ## License
 

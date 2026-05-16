@@ -125,3 +125,32 @@ def test_screen_invalid_n_jobs_raises():
     searcher = PharmacophoreSearch(query=ref, use_direction=False)
     with pytest.raises(ValueError, match="n_jobs"):
         searcher.screen([_embed("c1ccccc1O", 1)], n_jobs=-1, progress=False)
+
+
+def test_screen_min_matches_zero_is_auto():
+    query = _embed("c1ccccc1O", 0xF00D)
+    ref = query_pharmacophore_from_molecule(query)
+    searcher = PharmacophoreSearch(query=ref, use_direction=False)
+    explicit = searcher.screen(query, min_matches=len(ref), progress=False)
+    auto_default = searcher.screen(query, progress=False)
+    auto_zero = searcher.screen(query, min_matches=0, progress=False)
+    assert len(auto_default) == len(auto_zero) == len(explicit) == 1
+    assert auto_default[0][1].tanimoto == auto_zero[0][1].tanimoto
+    assert auto_zero[0][1].tanimoto == explicit[0][1].tanimoto
+
+
+def test_screen_min_matches_negative_raises():
+    query = _embed("c1ccccc1O", 0xF00D)
+    ref = query_pharmacophore_from_molecule(query)
+    searcher = PharmacophoreSearch(query=ref, use_direction=False)
+    with pytest.raises(ValueError, match=">= 0"):
+        searcher.screen(query, min_matches=-1, progress=False)
+
+
+def test_screen_min_matches_too_large_raises():
+    query = _embed("c1ccccc1O", 0xF00D)
+    ref = query_pharmacophore_from_molecule(query)
+    searcher = PharmacophoreSearch(query=ref, use_direction=False)
+    too_large = len(ref) + 100
+    with pytest.raises(ValueError, match="exceeds matchable query points"):
+        searcher.screen(query, min_matches=too_large, progress=False)

@@ -472,7 +472,7 @@ class PharmacophoreSearch:
         mols: Any,
         *,
         conformations: Conformations = "all",
-        min_matches: int | None = None,
+        min_matches: int = 0,
         keep: KeepMode = "best",
         metric: Metric = "tanimoto",
         n_jobs: int = 0,
@@ -491,7 +491,10 @@ class PharmacophoreSearch:
             positive ``int`` for the first N conformers.
         min_matches
             Minimum number of query points that must map to a molecule feature
-            for a hit. Defaults to ``count_matchable_query_points(query)``.
+            for a hit. ``0`` (the default) is auto-resolved to
+            ``count_matchable_query_points(query)`` — i.e. every query point
+            other than ``EXCL`` and ``UNDEF`` must match. Negative values or
+            values exceeding the matchable count raise ``ValueError``.
         keep
             ``'best'`` (default) keeps only the highest-scoring conformer per
             molecule; ``'all'`` keeps every conformer that satisfies
@@ -515,12 +518,12 @@ class PharmacophoreSearch:
             matched.
         """
         _validate_metric(metric)
-        if min_matches is None:
-            min_matches = count_matchable_query_points(self.query)
-        if min_matches < 1:
-            raise ValueError("min_matches must be >= 1")
+        if min_matches < 0:
+            raise ValueError("min_matches must be >= 0")
         max_matches = count_matchable_query_points(self.query)
-        if min_matches > max_matches:
+        if min_matches == 0:
+            min_matches = max_matches
+        elif min_matches > max_matches:
             raise ValueError(
                 f"min_matches ({min_matches}) exceeds matchable query points "
                 f"({max_matches})"
