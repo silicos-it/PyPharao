@@ -36,6 +36,7 @@ n_excl = add_excluded_volume(
     shell_outer=3.5,     # end   2.5 Å outside the vdW surface
     spacing=1.0,         # grid step (Å)
     feature_clearance=1.5,  # drop grid points within 1.5 Å of an existing feature
+    # max_excl=0 by default (no cap); pass max_excl=512 etc. to limit count
 )
 print(f"\nAdded {n_excl} EXCL spheres around phenol "
       f"({len(pharmacophore)} features total).")

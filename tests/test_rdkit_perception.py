@@ -1,9 +1,11 @@
+import math
+
 import pytest
 
 pytest.importorskip("rdkit")
 
 from rdkit import Chem
-from rdkit.Chem import AllChem
+from rdkit.Chem import AllChem, rdMolAlign
 
 from pypharao import (
     DEFAULT_SIGMA,
@@ -206,3 +208,114 @@ def test_add_excluded_volume_validates_parameters(kwargs):
     q = QueryPharmacophore()
     with pytest.raises(ValueError):
         add_excluded_volume(mol, q, **kwargs)
+
+
+def test_add_excluded_volume_conf_id_out_of_range_raises():
+    mol = _embed("CO")
+    q = QueryPharmacophore()
+    with pytest.raises(ValueError, match="out of range"):
+        add_excluded_volume(mol, q, conf_id=2)
+
+
+def test_add_excluded_volume_empty_mol_sequence_raises():
+    with pytest.raises(ValueError, match="at least one"):
+        add_excluded_volume([], QueryPharmacophore())
+
+
+def test_add_excluded_volume_accepts_list_of_molecules():
+    m1 = _embed("c1ccccc1O", seed=1)
+    m2 = _embed("c1ccccc1O", seed=2)
+    rdMolAlign.AlignMol(m2, m1)
+    q = query_pharmacophore_from_molecule(m1)
+    before = len(q)
+    n = add_excluded_volume([m1, m2], q, shell_inner=1.0, shell_outer=2.5, spacing=1.5)
+    assert n > 0
+    assert len(q) == before + n
+
+
+def test_add_excluded_volume_max_excl_caps_count():
+    mol = _embed("c1ccccc1O")
+    q = query_pharmacophore_from_molecule(mol)
+    n = add_excluded_volume(
+        mol,
+        q,
+        shell_inner=1.0,
+        shell_outer=2.5,
+        spacing=1.5,
+        max_excl=24,
+    )
+    assert 0 < n <= 24
+
+
+def test_add_excluded_volume_pairwise_spacing():
+    """Emitted EXCL centres are at least ``spacing`` apart (greedy thinning)."""
+    mol = _embed("c1ccccc1O")
+    q = query_pharmacophore_from_molecule(mol)
+    spacing = 1.5
+    add_excluded_volume(
+        mol,
+        q,
+        shell_inner=1.0,
+        shell_outer=2.5,
+        spacing=spacing,
+        max_excl=0,
+    )
+    excl = [(p.x, p.y, p.z) for p in q if p.type == PointType.EXCL]
+    assert len(excl) >= 2
+    for i in range(len(excl)):
+        for j in range(i + 1, len(excl)):
+            d = math.dist(excl[i], excl[j])
+            assert d >= spacing - 1e-6, (d, spacing)
+
+
+def _union_surface_distance(
+    mols: list[Chem.Mol],
+    conf_id: int | None,
+    x: float,
+    y: float,
+    z: float,
+) -> float:
+    """Union vdW surface distance at a point (matches ``add_excluded_volume`` geometry)."""
+    pt = Chem.GetPeriodicTable()
+    best = math.inf
+    for mol in mols:
+        if conf_id is None:
+            cids = range(mol.GetNumConformers())
+        else:
+            cids = [conf_id]
+        for cid in cids:
+            conf = mol.GetConformer(cid)
+            for atom in mol.GetAtoms():
+                if atom.GetAtomicNum() == 1:
+                    continue
+                pos = conf.GetAtomPosition(atom.GetIdx())
+                r = pt.GetRvdw(atom.GetAtomicNum())
+                d = math.hypot(x - pos.x, y - pos.y, z - pos.z) - r
+                best = min(best, d)
+    return best
+
+
+def test_add_excluded_volume_union_shell_matches_combined_atoms():
+    """Each EXCL lies in the shell band vs the union of selected heavy atoms."""
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC"))
+    cids = AllChem.EmbedMultipleConfs(mol, numConfs=2, randomSeed=77, clearConfs=True)
+    assert len(cids) == 2
+    q0 = QueryPharmacophore()
+    n0 = add_excluded_volume(
+        mol, q0, shell_inner=1.0, shell_outer=2.5, spacing=1.5, conf_id=0
+    )
+    q_all = QueryPharmacophore()
+    n_all = add_excluded_volume(
+        mol, q_all, shell_inner=1.0, shell_outer=2.5, spacing=1.5, conf_id=None
+    )
+    assert n0 > 0 and n_all > 0
+    mols = [mol]
+    for collection, n, cid in (
+        (q0, n0, 0),
+        (q_all, n_all, None),
+    ):
+        excl = [p for p in collection if p.type == PointType.EXCL]
+        assert len(excl) == n
+        for p in excl:
+            sd_u = _union_surface_distance(mols, cid, p.x, p.y, p.z)
+            assert 1.0 - 1e-9 <= sd_u <= 2.5 + 1e-9

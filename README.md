@@ -340,7 +340,7 @@ query_pharmacophore_from_protein(...)  # raises NotImplementedError (placeholder
 
 #### Adding excluded volumes around a molecule (requires RDKit)
 
-`EXCL` points are never auto-perceived. The convenience builder `add_excluded_volume` paints a *shape-complementarity envelope* around a reference ligand by appending `EXCL` features to an existing pharmacophore:
+`EXCL` points are never auto-perceived. The convenience builder `add_excluded_volume` paints a *shape-complementarity envelope* around one or more reference 3D structures by appending `EXCL` features to an existing pharmacophore:
 
 ```python
 from rdkit import Chem
@@ -358,10 +358,16 @@ n_excl = add_excluded_volume(
     shell_outer=2.5,        # end   2.5 Å outside the vdW surface
     spacing=1.5,            # grid step (Å)
     feature_clearance=1.5,  # drop grid points within 1.5 Å of an existing feature
+    # max_excl=0 by default (no cap); pass max_excl=512 etc. to limit count
 )
+# Also allowed: add_excluded_volume([mol_a, mol_b, ...], q, ...) with ligands
+# superimposed to the same frame; pass conf_id=0 (or any int) to use only that
+# conformer index in each molecule.
 ```
 
-Internally it lays a regular 3D grid over the bounding box of `mol` (vectorised with NumPy), keeps the points whose distance to the closest *heavy-atom vdW surface* falls in `[shell_inner, shell_outer]`, optionally drops points within `feature_clearance` of an existing pharmacophore feature, and appends each survivor as an `EXCL` `PharmacophorePoint`. Hydrogens are ignored. The return value is the number of points appended.
+Internally it lays a regular 3D grid over the bounding box of all heavy-atom centres that enter the calculation (vectorised with NumPy). Every heavy atom from every selected molecule and conformer is treated as part of **one artificial molecule**: at each vertex the vdW surface distance is the minimum over **all** those atoms (union of vdW spheres). Vertices in `[shell_inner, shell_outer]` relative to that union surface become candidates. After optional `feature_clearance` filtering, candidates are **thinned** (see below). Hydrogens are ignored. Several ligands should share one **aligned** coordinate frame.
+
+**How markers are chosen (`spacing` and `max_excl`).** Selection is **not random**; it is fully **deterministic**. Candidate grid vertices are sorted by **increasing union vdW surface distance** (smaller values are closer to the combined vdW surface and are considered first). The implementation then scans that order and **keeps** a vertex only if its centre is at least **`spacing`** ångström away from **every** centre already kept—so accepted `EXCL` sites obey a minimum pairwise separation. By default **`max_excl` is `0`**, meaning there is **no upper bound**: thinning runs until every candidate has been visited. If **`max_excl`** is **positive**, scanning **stops as soon as** that many centres have been kept (still respecting the separation rule among kept points).
 
 In Pharao scoring `EXCL` query points contribute two layers of shape filtering:
 
@@ -373,17 +379,18 @@ A shell placed *outside* the reference ligand therefore acts as a shape filter o
 
 | Argument            | Default                          | Description                                                                                       |
 | ------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `mol`               | —                                | 3D RDKit molecule with at least one conformer (heavy atoms only are used).                        |
+| `mol`               | —                                | One 3D RDKit molecule **or** a non-empty iterable of molecules (heavy atoms only). Use a **shared** frame when passing several ligands.              |
 | `pharmacophore`     | —                                | Target pharmacophore; must allow `EXCL` (typically a `QueryPharmacophore`).                       |
-| `conf_id`           | `0`                              | Conformer index used for atom coordinates.                                                        |
+| `conf_id`           | `None`                           | `None`: union includes **all** conformers of every molecule. An `int`: only that conformer index per molecule. |
 | `sigma`             | `DEFAULT_SIGMA[PointType.EXCL]`  | Gaussian width (Å) of each new `EXCL` point (default `1.6`).                                      |
 | `shell_inner`       | `1.0`                            | Inner distance (Å) of the shell, measured from the nearest heavy-atom vdW surface (`>= 0`).       |
 | `shell_outer`       | `3.0`                            | Outer distance (Å) of the shell (`> shell_inner`).                                                |
-| `spacing`           | `1.5`                            | Grid step (Å) along each axis (`> 0`).                                                            |
+| `spacing`           | `1.5`                            | Grid step (Å) along each axis (`> 0`); also the minimum separation between output `EXCL` centres after thinning. |
 | `feature_clearance` | `0.0`                            | If `> 0`, candidate EXCL points within this distance (Å) of an existing feature centre are dropped. |
+| `max_excl`          | `0`                              | Maximum number of EXCL markers after thinning (`0` or negative = no limit); see **How markers are chosen** above. |
 
 
-See `examples/03-excluded-volumes.py` for a full end-to-end example (query + EXCL envelope + screening). Tune `spacing` up (e.g. `2.0`) for a sparser envelope or down for a denser one; tune `shell_inner` / `shell_outer` to make the envelope tighter or looser.
+See `examples/03-excluded-volumes.py` for a full end-to-end example (query + EXCL envelope + screening), and `examples/04-excluded-volumes-from-multiple-ligands.py` for building an envelope from several aligned ligands and their conformers. Raise `spacing` for sparser sampling on the grid (and larger minimum separation between accepted centres). Pass a positive `max_excl` if you want to cap how many markers survive thinning (default `0` = no cap). Tune `shell_inner` / `shell_outer` to make the envelope tighter or looser.
 
 ## 3. Pharmacophore perception
 

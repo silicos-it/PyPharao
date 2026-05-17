@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -498,6 +499,151 @@ def _require_conformer(mol: Any) -> None:
         )
 
 
+def _normalize_mols_arg(mol: Chem.Mol | Sequence[Chem.Mol]) -> list[Chem.Mol]:
+    if isinstance(mol, Chem.Mol):
+        return [mol]
+    try:
+        mols = list(mol)
+    except TypeError as e:
+        raise TypeError(
+            "mol must be an rdkit.Chem.Mol or an iterable of Mol instances"
+        ) from e
+    if not mols:
+        raise ValueError("add_excluded_volume requires at least one molecule")
+    for i, m in enumerate(mols):
+        if not isinstance(m, Chem.Mol):
+            raise TypeError(
+                "add_excluded_volume expected RDKit Mol instances; "
+                f"got {type(m).__name__!r} at index {i}"
+            )
+    return mols
+
+
+def _conf_ids(mol: Chem.Mol, conf_id: int | None) -> list[int]:
+    n = mol.GetNumConformers()
+    if conf_id is None:
+        return list(range(n))
+    if conf_id < 0 or conf_id >= n:
+        raise ValueError(
+            f"conf_id {conf_id} is out of range for a molecule with {n} conformer(s)"
+        )
+    return [conf_id]
+
+
+def _mol_has_heavy_atom(mol: Chem.Mol) -> bool:
+    return any(a.GetAtomicNum() != 1 for a in mol.GetAtoms())
+
+
+def _grid_axes_from_mols(
+    mols: list[Chem.Mol],
+    conf_id: int | None,
+    *,
+    shell_outer: float,
+    spacing: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Union bounding box of all heavy-atom centres (all mols, selected confs)."""
+    all_pts: list[tuple[float, float, float]] = []
+    max_r = 0.0
+    for mol in mols:
+        for atom in mol.GetAtoms():
+            if atom.GetAtomicNum() == 1:
+                continue
+            max_r = max(max_r, _vdw(atom.GetAtomicNum()))
+            aid = atom.GetIdx()
+            for cid in _conf_ids(mol, conf_id):
+                p = mol.GetConformer(cid).GetAtomPosition(aid)
+                all_pts.append((p.x, p.y, p.z))
+    if not all_pts:
+        return None
+    centers = np.asarray(all_pts, dtype=float)
+    pad = float(max_r) + shell_outer + spacing
+    lo = centers.min(axis=0) - pad
+    hi = centers.max(axis=0) + pad
+    axes = [
+        np.arange(lo[d], hi[d] + 0.5 * spacing, spacing, dtype=float)
+        for d in range(3)
+    ]
+    gx, gy, gz = np.meshgrid(axes[0], axes[1], axes[2], indexing="ij")
+    return gx, gy, gz
+
+
+def _collect_union_heavy_centers_radii(
+    mols: list[Chem.Mol],
+    conf_id: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """All heavy-atom centres and vdW radii from every selected conformer.
+
+    Used to treat the ensemble as one artificial molecule for envelope distance.
+    """
+    centers_list: list[tuple[float, float, float]] = []
+    radii_list: list[float] = []
+    for mol in mols:
+        for cid in _conf_ids(mol, conf_id):
+            conf = mol.GetConformer(cid)
+            for atom in mol.GetAtoms():
+                if atom.GetAtomicNum() == 1:
+                    continue
+                p = conf.GetAtomPosition(atom.GetIdx())
+                centers_list.append((p.x, p.y, p.z))
+                radii_list.append(_vdw(atom.GetAtomicNum()))
+    return np.asarray(centers_list, dtype=float), np.asarray(radii_list, dtype=float)
+
+
+def _min_surface_dist_grid_union(
+    grid: np.ndarray,
+    mols: list[Chem.Mol],
+    conf_id: int | None,
+) -> np.ndarray:
+    """vdW surface distance from each grid point to the union of all pose spheres."""
+    centers, radii = _collect_union_heavy_centers_radii(mols, conf_id)
+    if centers.shape[0] == 0:
+        return np.full(grid.shape[0], np.inf, dtype=float)
+    ng = grid.shape[0]
+    n_atom = centers.shape[0]
+    out = np.empty(ng, dtype=float)
+    # Limit grid×atom peak memory (still vectorised per chunk).
+    max_pairs = 8_000_000
+    chunk = max(2048, max_pairs // max(1, n_atom))
+    for start in range(0, ng, chunk):
+        stop = min(start + chunk, ng)
+        g = grid[start:stop]
+        diff = g[:, None, :] - centers[None, :, :]
+        surf = np.sqrt(np.einsum("bad,bad->ba", diff, diff)) - radii[None, :]
+        out[start:stop] = surf.min(axis=1)
+    return out
+
+
+def _thin_points_min_spacing(
+    points: np.ndarray,
+    priorities: np.ndarray,
+    spacing: float,
+    *,
+    max_points: int | None,
+) -> np.ndarray:
+    """Keep a subset with pairwise Euclidean distance ≥ ``spacing``.
+
+    Candidates are visited in ascending ``priorities`` order (lower first).
+    If ``max_points`` is set, stop once that many centres have been kept (prioritising
+    bulky shell regions first).
+    """
+    if points.shape[0] == 0:
+        return points
+    order = np.argsort(priorities, kind="mergesort")
+    pts = points[order]
+    kept: list[np.ndarray] = []
+    thr = float(spacing)
+    for p in pts:
+        if max_points is not None and len(kept) >= max_points:
+            break
+        if not kept:
+            kept.append(p)
+            continue
+        stack = np.stack(kept, axis=0)
+        if np.linalg.norm(stack - p, axis=1).min() >= thr - 1e-9:
+            kept.append(p)
+    return np.stack(kept, axis=0) if kept else np.zeros((0, 3), dtype=float)
+
+
 def query_pharmacophore_from_molecule(
     mol: Chem.Mol,
     perception: QueryPharmacophorePerception | None = None,
@@ -554,25 +700,32 @@ def molecule_pharmacophore_from_molecule(
 
 
 def add_excluded_volume(
-    mol: Chem.Mol,
+    mol: Chem.Mol | Sequence[Chem.Mol],
     pharmacophore: Pharmacophore,
     *,
-    conf_id: int = 0,
+    conf_id: int | None = None,
     sigma: float | None = None,
     shell_inner: float = 1.0,
     shell_outer: float = 3.0,
     spacing: float = 1.5,
     feature_clearance: float = 0.0,
+    max_excl: int = 0,
 ) -> int:
-    """Add ``EXCL`` points on a shape envelope around a 3D molecule.
+    """Add ``EXCL`` points on a shape envelope around 3D reference structure(s).
 
-    A regular 3D grid is laid out over the bounding box of ``mol`` (heavy
-    atoms only). For each grid point the distance to the *closest heavy-atom
-    vdW surface* is computed (``dist(atom centre) - vdW(atom)``); points
-    whose surface distance falls in the half-open shell
-    ``[shell_inner, shell_outer]`` (in ångström) are appended to
-    ``pharmacophore`` as :class:`PharmacophorePoint` of type
-    :data:`PointType.EXCL`.
+    A regular 3D grid is laid out over the bounding box of all heavy-atom centres
+    from every molecule and selected conformer. Those atoms are treated as **one
+    artificial molecule**: at each grid vertex the vdW surface distance is the
+    minimum of ``distance − vdW radius`` over **all** heavy atoms in **all** poses
+    (union of vdW spheres). Vertices whose distance lies in
+    ``[shell_inner, shell_outer]`` are shell candidates.
+
+    Candidates are optionally filtered by ``feature_clearance``, ordered by
+    surface distance (closest-to-surface first among the union), then **thinned**:
+    an ``EXCL`` is kept only if its centre is at least ``spacing`` ångström from
+    every centre already kept. By default there is **no** limit on how many
+    markers are kept (``max_excl=0``); pass a positive ``max_excl`` to cap the
+    count after thinning.
 
     In Pharao scoring an ``EXCL`` query point penalises overlap with the
     candidate molecule's volume, so placing the spheres on a shell *outside*
@@ -582,13 +735,17 @@ def add_excluded_volume(
 
     Parameters
     ----------
-    mol : rdkit.Chem.Mol
-        3D molecule with at least one conformer. Hydrogens are ignored.
+    mol : rdkit.Chem.Mol or sequence of Mol
+        One or more 3D molecules with at least one conformer each. Hydrogens
+        are ignored. Multiple molecules should occupy a **common coordinate
+        frame** (e.g. superimposed); all poses contribute atoms to the union
+        envelope.
     pharmacophore : Pharmacophore
         Target pharmacophore. Must allow ``EXCL`` (i.e. a
         :class:`QueryPharmacophore`); otherwise ``add_point`` raises.
-    conf_id : int, optional
-        Conformer index used for atom coordinates (default ``0``).
+    conf_id : int or None, optional
+        If ``None`` (default), use **all** conformers of every molecule.
+        If an integer, use only that conformer index in each molecule.
     sigma : float, optional
         Gaussian width (Å) of each EXCL point. Defaults to
         ``DEFAULT_SIGMA[PointType.EXCL]`` (1.6 Å).
@@ -597,19 +754,25 @@ def add_excluded_volume(
         heavy-atom vdW surface. Defaults: ``1.0`` and ``3.0``. ``shell_inner``
         must be ``>= 0`` and strictly less than ``shell_outer``.
     spacing : float, optional
-        Grid step (Å) along each axis (default ``1.5``).
+        Grid step (Å) along each axis (default ``1.5``). Also the **minimum**
+        centre-to-centre separation between emitted ``EXCL`` markers after
+        thinning.
     feature_clearance : float, optional
         If ``> 0``, candidate EXCL points within this distance (Å) of an
         existing pharmacophore feature centre are discarded. Useful when a
         ligand feature sits at the rim of the envelope and you don't want
         the shell to overlap it.
+    max_excl : int, optional
+        Maximum number of ``EXCL`` markers to append after thinning.
+        Default ``0`` means no cap. Use any positive integer to stop after that
+        many accepted centres.
 
     Returns
     -------
     int
         Number of EXCL points actually appended to ``pharmacophore``.
     """
-    _require_conformer(mol)
+    mols = _normalize_mols_arg(mol)
     if shell_inner < 0.0 or shell_outer <= shell_inner:
         raise ValueError(
             "shell_inner must be >= 0 and shell_outer must exceed shell_inner"
@@ -617,37 +780,32 @@ def add_excluded_volume(
     if spacing <= 0.0:
         raise ValueError("spacing must be > 0")
 
+    cap: int | None = None if max_excl <= 0 else int(max_excl)
+
     excl_sigma = float(DEFAULT_SIGMA[PointType.EXCL] if sigma is None else sigma)
 
-    conf = mol.GetConformer(conf_id)
-    centers_list: list[tuple[float, float, float]] = []
-    radii_list: list[float] = []
-    for atom in mol.GetAtoms():
-        if atom.GetAtomicNum() == 1:
-            continue
-        p = conf.GetAtomPosition(atom.GetIdx())
-        centers_list.append((p.x, p.y, p.z))
-        radii_list.append(_vdw(atom.GetAtomicNum()))
-    if not centers_list:
+    for m in mols:
+        _require_conformer(m)
+        if not _mol_has_heavy_atom(m):
+            return 0
+
+    mesh = _grid_axes_from_mols(
+        mols, conf_id, shell_outer=shell_outer, spacing=spacing
+    )
+    if mesh is None:
         return 0
+    gx, gy, gz = mesh
+    grid = np.stack(
+        [gx.ravel(), gy.ravel(), gz.ravel()],
+        axis=1,
+    )  # (Ng, 3)
 
-    centers = np.asarray(centers_list, dtype=float)               # (Na, 3)
-    radii = np.asarray(radii_list, dtype=float)                   # (Na,)
-
-    pad = float(radii.max()) + shell_outer + spacing
-    lo = centers.min(axis=0) - pad
-    hi = centers.max(axis=0) + pad
-    axes = [
-        np.arange(lo[d], hi[d] + 0.5 * spacing, spacing, dtype=float)
-        for d in range(3)
-    ]
-    gx, gy, gz = np.meshgrid(axes[0], axes[1], axes[2], indexing="ij")
-    grid = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)  # (Ng, 3)
-
-    diff = grid[:, None, :] - centers[None, :, :]                  # (Ng, Na, 3)
-    surf = np.sqrt(np.einsum("gad,gad->ga", diff, diff)) - radii[None, :]
-    min_surf = surf.min(axis=1)                                    # (Ng,)
-    mask = (min_surf >= shell_inner) & (min_surf <= shell_outer)
+    sd_union = _min_surface_dist_grid_union(grid, mols, conf_id)
+    shell_ok = (sd_union >= shell_inner) & (sd_union <= shell_outer)
+    pooled = grid[shell_ok]
+    priorities = sd_union[shell_ok]
+    if pooled.shape[0] == 0:
+        return 0
 
     if feature_clearance > 0.0:
         feature_pts = np.asarray(
@@ -659,11 +817,17 @@ def add_excluded_volume(
             dtype=float,
         )
         if feature_pts.size:
-            fdiff = grid[:, None, :] - feature_pts[None, :, :]     # (Ng, Nf, 3)
-            min_fdist_sq = np.einsum("gfd,gfd->gf", fdiff, fdiff).min(axis=1)
-            mask &= min_fdist_sq >= feature_clearance * feature_clearance
+            fdiff = pooled[:, None, :] - feature_pts[None, :, :]
+            min_fdist_sq = np.einsum("pfd,pfd->pf", fdiff, fdiff).min(axis=1)
+            keep_fc = min_fdist_sq >= feature_clearance * feature_clearance
+            pooled = pooled[keep_fc]
+            priorities = priorities[keep_fc]
 
-    survivors = grid[mask]
+    if pooled.shape[0] == 0:
+        return 0
+    survivors = _thin_points_min_spacing(
+        pooled, priorities, float(spacing), max_points=cap
+    )
     for x, y, z in survivors:
         pharmacophore.add_point(
             PharmacophorePoint(
