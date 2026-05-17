@@ -338,6 +338,53 @@ q = query_pharmacophore_from_molecule(mol, name="phenol")
 query_pharmacophore_from_protein(...)  # raises NotImplementedError (placeholder)
 ```
 
+#### Adding excluded volumes around a molecule (requires RDKit)
+
+`EXCL` points are never auto-perceived. The convenience builder `add_excluded_volume` paints a *shape-complementarity envelope* around a reference ligand by appending `EXCL` features to an existing pharmacophore:
+
+```python
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from pypharao import *
+
+mol = Chem.AddHs(Chem.MolFromSmiles("c1ccccc1O"))
+AllChem.EmbedMolecule(mol, randomSeed=0xF00D)
+AllChem.UFFOptimizeMolecule(mol)
+
+q = query_pharmacophore_from_molecule(mol, name="phenol")
+n_excl = add_excluded_volume(
+    mol, q,
+    shell_inner=1.0,        # start 1.0 Å outside the vdW surface
+    shell_outer=2.5,        # end   2.5 Å outside the vdW surface
+    spacing=1.5,            # grid step (Å)
+    feature_clearance=1.5,  # drop grid points within 1.5 Å of an existing feature
+)
+```
+
+Internally it lays a regular 3D grid over the bounding box of `mol` (vectorised with NumPy), keeps the points whose distance to the closest *heavy-atom vdW surface* falls in `[shell_inner, shell_outer]`, optionally drops points within `feature_clearance` of an existing pharmacophore feature, and appends each survivor as an `EXCL` `PharmacophorePoint`. Hydrogens are ignored. The return value is the number of points appended.
+
+In Pharao scoring `EXCL` query points contribute two layers of shape filtering:
+
+1. A **soft volume penalty** (`with_exclusion=True`): the overlap between each `EXCL` point and the candidate's pharmacophore features is subtracted from the aligned overlap volume and reflected by `MatchResult.excl_volume`.
+2. A **hard atom-clash filter** (`excl_hard_filter=True`, on by default): after alignment, every heavy atom of the aligned database molecule is treated as a sphere of its van der Waals radius. The hit is rejected as soon as `dist(atom_center, EXCL_center) < vdW(atom) + excl_clash_radius` for any heavy atom / EXCL pair. The default `excl_clash_radius=0.0` means the EXCL is a bare marker point — a clash fires whenever an atom's vdW sphere swallows the marker. Increase `excl_clash_radius` to enforce a larger buffer; set `excl_hard_filter=False` to recover the pure soft-penalty behaviour. This criterion is independent of the EXCL's Gaussian `sigma` (which only feeds the soft penalty above).
+
+A shell placed *outside* the reference ligand therefore acts as a shape filter on two levels: candidates whose pharmacophore features extend beyond the envelope are down-weighted, *and* candidates whose heavy atoms intrude into the forbidden shell are discarded. `add_excluded_volume` expects a pharmacophore that allows `EXCL` (a `QueryPharmacophore`); passing a `MoleculePharmacophore` raises `ValueError`.
+
+
+| Argument            | Default                          | Description                                                                                       |
+| ------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `mol`               | —                                | 3D RDKit molecule with at least one conformer (heavy atoms only are used).                        |
+| `pharmacophore`     | —                                | Target pharmacophore; must allow `EXCL` (typically a `QueryPharmacophore`).                       |
+| `conf_id`           | `0`                              | Conformer index used for atom coordinates.                                                        |
+| `sigma`             | `DEFAULT_SIGMA[PointType.EXCL]`  | Gaussian width (Å) of each new `EXCL` point (default `1.6`).                                      |
+| `shell_inner`       | `1.0`                            | Inner distance (Å) of the shell, measured from the nearest heavy-atom vdW surface (`>= 0`).       |
+| `shell_outer`       | `3.0`                            | Outer distance (Å) of the shell (`> shell_inner`).                                                |
+| `spacing`           | `1.5`                            | Grid step (Å) along each axis (`> 0`).                                                            |
+| `feature_clearance` | `0.0`                            | If `> 0`, candidate EXCL points within this distance (Å) of an existing feature centre are dropped. |
+
+
+See `examples/03-excluded-volumes.py` for a full end-to-end example (query + EXCL envelope + screening). Tune `spacing` up (e.g. `2.0`) for a sparser envelope or down for a denser one; tune `shell_inner` / `shell_outer` to make the envelope tighter or looser.
+
 ## 3. Pharmacophore perception
 
 A `PharmacophorePerception` instance controls **which feature types** are emitted when a pharmacophore is built from a 3D molecule. There are two subclasses:
@@ -351,7 +398,7 @@ Both subclasses cover the same seven auto-perceivable types and default to *all 
 AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC
 ```
 
-`AROM` and `LIPO` are mutually exclusive at perception time: an aromatic ring is reported only as `AROM`, while a lipophilic moiety that is *not* aromatic is reported as `LIPO`. `EXCL`, `UNDEF`, `AROM_OR_LIPO` and `HACC_OR_HDON` are never auto-perceived; introduce them by hand on the resulting `QueryPharmacophore` (e.g. by converting an `AROM`/`LIPO` point to `AROM_OR_LIPO` or an `HDON`/`HACC` pair to `HACC_OR_HDON`, or by placing `EXCL` spheres around the molecule — see `examples/03-excluded-volumes.py`). The base `PharmacophorePerception` is abstract — instantiate one of the two subclasses instead.
+`AROM` and `LIPO` are mutually exclusive at perception time: an aromatic ring is reported only as `AROM`, while a lipophilic moiety that is *not* aromatic is reported as `LIPO`. `EXCL`, `UNDEF`, `AROM_OR_LIPO` and `HACC_OR_HDON` are never auto-perceived; introduce them by hand on the resulting `QueryPharmacophore` (e.g. by converting an `AROM`/`LIPO` point to `AROM_OR_LIPO` or an `HDON`/`HACC` pair to `HACC_OR_HDON`, or by calling [`add_excluded_volume`](#adding-excluded-volumes-around-a-molecule-requires-rdkit) to wrap a shape-complementarity envelope around a ligand — see `examples/03-excluded-volumes.py`). The base `PharmacophorePerception` is abstract — instantiate one of the two subclasses instead.
 
 ### API
 
@@ -389,12 +436,14 @@ searcher = PharmacophoreSearch(query, perception=opts)  # custom molecule percep
 
 | Name               | Type                                     | Default      | Purpose                                                                                                                     |
 | ------------------ | ---------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `query`            | `QueryPharmacophore`                     | *(required)* | Query pharmacophore. A `TypeError` is raised at construction if this isn't a `QueryPharmacophore`.                          |
-| `perception`       | `MoleculePharmacophorePerception | None` | `None`       | How database molecules are perceived. `None` ⇒ a default `MoleculePharmacophorePerception()` is created in `__post_init__`. |
-| `epsilon`          | `float`                                  | `0.5`        | Tolerance used by `FunctionMapping` when proposing candidate feature mappings.                                              |
-| `use_direction`    | `bool`                                   | `True`       | Use feature normals (AROM / AROM_OR_LIPO) in volume scoring and alignment.                                                  |
-| `with_exclusion`   | `bool`                                   | `True`       | Include `EXCL` spheres when scoring (penalises overlap with database features).                                             |
-| `early_exit_score` | `float`                                  | `0.98`       | Tanimoto threshold above which the search stops exploring further mappings.                                                 |
+| `query`             | `QueryPharmacophore`                     | *(required)* | Query pharmacophore. A `TypeError` is raised at construction if this isn't a `QueryPharmacophore`.                                                                                                              |
+| `perception`        | `MoleculePharmacophorePerception | None` | `None`       | How database molecules are perceived. `None` ⇒ a default `MoleculePharmacophorePerception()` is created in `__post_init__`.                                                                                     |
+| `epsilon`           | `float`                                  | `0.5`        | Tolerance used by `FunctionMapping` when proposing candidate feature mappings.                                                                                                                                  |
+| `use_direction`     | `bool`                                   | `True`       | Use feature normals (AROM / AROM_OR_LIPO) in volume scoring and alignment.                                                                                                                                      |
+| `with_exclusion`    | `bool`                                   | `True`       | Include `EXCL` spheres in the Pharao soft penalty (subtracted from the aligned overlap volume; reflected by `MatchResult.excl_volume`).                                                                         |
+| `early_exit_score`  | `float`                                  | `0.98`       | Tanimoto threshold above which the search stops exploring further mappings.                                                                                                                                     |
+| `excl_hard_filter`  | `bool`                                   | `True`       | After alignment, reject any conformer whose heavy atoms (ignoring hydrogens) intrude into a query `EXCL` sphere. Set `False` to revert to the pure Pharao soft penalty.                                                                                                                                                                  |
+| `excl_clash_radius` | `float`                                  | `0.0`        | Extra padding (Å, `>= 0`) added to every heavy-atom van der Waals radius when checking for a clash with an `EXCL` marker. The clash criterion is `dist(atom_center, EXCL_center) < vdW(atom) + excl_clash_radius`; `0.0` (default) means "an atom's vdW sphere must not contain any EXCL marker". Independent of the EXCL Gaussian `sigma`. |
 
 
 **Public methods**

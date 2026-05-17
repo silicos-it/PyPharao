@@ -6,11 +6,13 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 
 from pypharao import (
+    DEFAULT_SIGMA,
     MoleculePharmacophore,
     MoleculePharmacophorePerception,
     PointType,
     QueryPharmacophore,
     QueryPharmacophorePerception,
+    add_excluded_volume,
     molecule_pharmacophore_from_molecule,
     query_pharmacophore_from_molecule,
     query_pharmacophore_from_protein,
@@ -122,3 +124,85 @@ def test_molecule_perception_subclass_perception_allowed_in_screen():
 def test_query_from_protein_is_stub():
     with pytest.raises(NotImplementedError):
         query_pharmacophore_from_protein()
+
+
+def _heavy_atom_centers(mol: Chem.Mol):
+    conf = mol.GetConformer()
+    pt = Chem.GetPeriodicTable()
+    return [
+        (
+            conf.GetAtomPosition(a.GetIdx()).x,
+            conf.GetAtomPosition(a.GetIdx()).y,
+            conf.GetAtomPosition(a.GetIdx()).z,
+            pt.GetRvdw(a.GetAtomicNum()),
+        )
+        for a in mol.GetAtoms()
+        if a.GetAtomicNum() != 1
+    ]
+
+
+def test_add_excluded_volume_appends_excl_in_shell():
+    mol = _embed("c1ccccc1O")
+    q = query_pharmacophore_from_molecule(mol)
+    before = len(q)
+    n = add_excluded_volume(
+        mol, q, shell_inner=1.0, shell_outer=2.5, spacing=1.5
+    )
+    assert n > 0
+    assert len(q) == before + n
+    excl = [p for p in q if p.type == PointType.EXCL]
+    assert len(excl) == n
+    # default sigma is the Pharao EXCL default
+    assert {p.sigma for p in excl} == {DEFAULT_SIGMA[PointType.EXCL]}
+    # every EXCL must sit in [shell_inner, shell_outer] from the closest vdW surface
+    centers = _heavy_atom_centers(mol)
+    for p in excl:
+        surf = min(
+            ((p.x - cx) ** 2 + (p.y - cy) ** 2 + (p.z - cz) ** 2) ** 0.5 - r
+            for cx, cy, cz, r in centers
+        )
+        assert 1.0 - 1e-9 <= surf <= 2.5 + 1e-9
+
+
+def test_add_excluded_volume_custom_sigma_and_feature_clearance():
+    mol = _embed("c1ccccc1O")
+    q = query_pharmacophore_from_molecule(mol)
+    feature_centers = [(p.x, p.y, p.z) for p in q if p.type != PointType.EXCL]
+    n = add_excluded_volume(
+        mol,
+        q,
+        sigma=2.0,
+        shell_inner=1.0,
+        shell_outer=2.5,
+        spacing=1.5,
+        feature_clearance=1.5,
+    )
+    excl = [p for p in q if p.type == PointType.EXCL]
+    assert len(excl) == n
+    assert {p.sigma for p in excl} == {2.0}
+    for p in excl:
+        for fx, fy, fz in feature_centers:
+            d2 = (p.x - fx) ** 2 + (p.y - fy) ** 2 + (p.z - fz) ** 2
+            assert d2 >= 1.5 * 1.5 - 1e-9
+
+
+def test_add_excluded_volume_rejected_on_molecule_pharmacophore():
+    mol = _embed("c1ccccc1O")
+    db = MoleculePharmacophore()
+    with pytest.raises(ValueError):
+        add_excluded_volume(mol, db)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"shell_inner": -0.1},
+        {"shell_inner": 2.0, "shell_outer": 1.0},
+        {"spacing": 0.0},
+    ],
+)
+def test_add_excluded_volume_validates_parameters(kwargs):
+    mol = _embed("c1ccccc1O")
+    q = QueryPharmacophore()
+    with pytest.raises(ValueError):
+        add_excluded_volume(mol, q, **kwargs)

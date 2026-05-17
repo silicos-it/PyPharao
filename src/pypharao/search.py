@@ -222,6 +222,8 @@ class _ScreenConfig:
     use_direction: bool
     with_exclusion: bool
     early_exit_score: float
+    excl_hard_filter: bool
+    excl_clash_radius: float
     conformations: Conformations
     min_matches: int
     keep: KeepMode
@@ -258,6 +260,72 @@ def _build_aligned_mol(mol: Any, conf_id: int, alignment: SolutionInfo) -> Any |
         return None
 
 
+def _aligned_heavy_atom_coords(
+    mol: Any, conf_id: int, alignment: SolutionInfo
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Return ``(coords, vdw_radii)`` for heavy atoms, in the query frame.
+
+    ``coords`` is an ``(N, 3)`` float array of heavy-atom positions transformed
+    via ``alignment``; ``vdw_radii`` is an ``(N,)`` float array of their
+    Bondi-style van der Waals radii (``rdkit.Chem.GetPeriodicTable``).
+    Returns ``None`` if ``mol`` has no conformers or no heavy atoms.
+    """
+    if mol.GetNumConformers() == 0:
+        return None
+    try:
+        from rdkit import Chem
+    except ImportError:
+        return None
+    conf = mol.GetConformer(conf_id)
+    periodic = Chem.GetPeriodicTable()
+    rows: list[tuple[float, float, float]] = []
+    vdw: list[float] = []
+    for atom in mol.GetAtoms():
+        z = atom.GetAtomicNum()
+        if z == 1:
+            continue
+        p = conf.GetAtomPosition(atom.GetIdx())
+        rows.append((p.x, p.y, p.z))
+        vdw.append(float(periodic.GetRvdw(z)))
+    if not rows:
+        return None
+    coords = np.asarray(rows, dtype=float)
+    rot = quat_to_rotation_matrix(alignment.rotor)
+    aligned = position_molecule_coords(coords, rot, alignment)
+    return aligned, np.asarray(vdw, dtype=float)
+
+
+def _has_excl_atom_clash(
+    query: Pharmacophore,
+    heavy_coords: np.ndarray,
+    heavy_vdw: np.ndarray,
+    excl_clash_radius: float,
+) -> bool:
+    """Return ``True`` if any heavy-atom vdW sphere overlaps a query EXCL marker.
+
+    Each heavy atom is modelled as a sphere of its van der Waals radius and
+    each EXCL point as a sphere of ``excl_clash_radius`` (``0.0`` means the
+    EXCL is a bare marker point). A clash is registered when
+
+    ``dist(atom_center, EXCL_center) < vdW(atom) + excl_clash_radius``.
+
+    This is independent of the EXCL's Gaussian ``sigma`` (which only controls
+    the soft Pharao volume penalty).
+    """
+    centers: list[tuple[float, float, float]] = []
+    for p in query:
+        if p.type != PointType.EXCL:
+            continue
+        centers.append((p.x, p.y, p.z))
+    if not centers:
+        return False
+    excl_centers = np.asarray(centers, dtype=float)
+    diff = heavy_coords[:, None, :] - excl_centers[None, :, :]
+    dist_sq = np.einsum("aed,aed->ae", diff, diff)
+    thresh = heavy_vdw[:, None] + float(excl_clash_radius)
+    return bool(np.any(dist_sq < thresh * thresh))
+
+
 def _worker(args: tuple[_ScreenConfig, int, Any]) -> list[tuple[int, MatchResult]]:
     config, index, mol = args
     searcher = PharmacophoreSearch(
@@ -267,6 +335,8 @@ def _worker(args: tuple[_ScreenConfig, int, Any]) -> list[tuple[int, MatchResult
         use_direction=config.use_direction,
         with_exclusion=config.with_exclusion,
         early_exit_score=config.early_exit_score,
+        excl_hard_filter=config.excl_hard_filter,
+        excl_clash_radius=config.excl_clash_radius,
     )
     hits = searcher._screen_one_mol(
         mol,
@@ -285,6 +355,23 @@ class PharmacophoreSearch:
     ``perception`` controls how each database molecule is converted to a
     :class:`MoleculePharmacophore`. When ``None`` (the default) every molecule
     feature type is enabled.
+
+    Excluded-volume handling has two layers:
+
+    * **Soft Pharao penalty** (``with_exclusion``) — included in the alignment
+      objective and reflected by ``MatchResult.excl_volume``.
+    * **Hard atom-clash filter** (``excl_hard_filter``) — applied *after*
+      alignment. Heavy atoms of the aligned database molecule are projected
+      into the query frame and a hit is discarded as soon as any heavy-atom
+      vdW sphere overlaps a query EXCL marker:
+
+      ``dist(atom_center, EXCL_center) < vdW(atom) + excl_clash_radius``.
+
+      The default ``excl_clash_radius=0.0`` treats each EXCL as a bare marker
+      point — a clash is reported when an atom's vdW sphere swallows the
+      marker. Increase ``excl_clash_radius`` to enforce a larger forbidden
+      buffer around each EXCL. This criterion is independent of the EXCL's
+      Gaussian ``sigma`` (which only feeds the soft penalty).
     """
 
     query: QueryPharmacophore
@@ -293,6 +380,8 @@ class PharmacophoreSearch:
     use_direction: bool = True
     with_exclusion: bool = True
     early_exit_score: float = 0.98
+    excl_hard_filter: bool = True
+    excl_clash_radius: float = 0.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.query, QueryPharmacophore):
@@ -302,6 +391,8 @@ class PharmacophoreSearch:
             )
         if self.perception is None:
             self.perception = MoleculePharmacophorePerception()
+        if self.excl_clash_radius < 0.0:
+            raise ValueError("excl_clash_radius must be >= 0")
 
     # ------------------------------------------------------------------ search
     def _search_with_alignment(
@@ -447,6 +538,11 @@ class PharmacophoreSearch:
         from .rdkit_perception import molecule_pharmacophore_from_molecule
 
         conf_ids = _resolve_conformations(mol, conformations)
+        # Only run the hard atom-clash filter when the query actually has
+        # EXCL features; precompute the flag once per molecule.
+        hard_filter_active = self.excl_hard_filter and any(
+            p.type == PointType.EXCL for p in self.query
+        )
         results: list[MatchResult] = []
         best: MatchResult | None = None
         for cid in conf_ids:
@@ -456,6 +552,14 @@ class PharmacophoreSearch:
             match, alignment = self._search_with_alignment(self.query, db, min_matches)
             if not match.mapping:
                 continue
+            if hard_filter_active:
+                aligned = _aligned_heavy_atom_coords(mol, cid, alignment)
+                if aligned is not None:
+                    heavy_xyz, heavy_vdw = aligned
+                    if _has_excl_atom_clash(
+                        self.query, heavy_xyz, heavy_vdw, self.excl_clash_radius
+                    ):
+                        continue
             match.conf_id = cid
             match.aligned_mol = _build_aligned_mol(mol, cid, alignment)
             if keep == "best":
@@ -548,6 +652,8 @@ class PharmacophoreSearch:
             use_direction=self.use_direction,
             with_exclusion=self.with_exclusion,
             early_exit_score=self.early_exit_score,
+            excl_hard_filter=self.excl_hard_filter,
+            excl_clash_radius=self.excl_clash_radius,
             conformations=conformations,
             min_matches=min_matches,
             keep=keep,

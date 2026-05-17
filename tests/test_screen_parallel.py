@@ -6,8 +6,11 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 
 from pypharao import (
+    PharmacophorePoint,
     PharmacophoreSearch,
     PointType,
+    QueryPharmacophore,
+    add_excluded_volume,
     query_pharmacophore_from_molecule,
 )
 
@@ -154,3 +157,122 @@ def test_screen_min_matches_too_large_raises():
     too_large = len(ref) + 100
     with pytest.raises(ValueError, match="exceeds matchable query points"):
         searcher.screen(query, min_matches=too_large, progress=False)
+
+
+# ---------------------------------------------------------------------------
+# Hard EXCL atom-clash filter
+# ---------------------------------------------------------------------------
+#
+# The criterion is geometric:
+#     dist(atom_center, EXCL_center) < vdW(atom) + excl_clash_radius.
+# The default ``excl_clash_radius=0`` rejects whenever the EXCL marker falls
+# inside any heavy-atom vdW sphere. The EXCL's Gaussian ``sigma`` only feeds
+# the soft Pharao penalty and does **not** affect this criterion.
+
+
+def _phenol_query_with_excl_at_atom(idx: int):
+    """Return (mol, query) where query has phenol's features plus an EXCL at heavy atom ``idx``."""
+    mol = _embed("c1ccccc1O", 0xF00D)
+    query = query_pharmacophore_from_molecule(mol)
+    pos = mol.GetConformer().GetAtomPosition(idx)
+    query.add_point(
+        PharmacophorePoint(
+            type=PointType.EXCL,
+            center=(pos.x, pos.y, pos.z),
+        )
+    )
+    return mol, query
+
+
+def test_hard_excl_filter_rejects_atom_clash_by_default():
+    """Self-screen fails when an EXCL sits exactly on a heavy atom of the candidate."""
+    mol, query = _phenol_query_with_excl_at_atom(idx=0)
+    searcher = PharmacophoreSearch(query=query, use_direction=False)
+    hits = searcher.screen(mol, progress=False, n_jobs=1)
+    assert hits == []
+
+
+def test_hard_excl_filter_disabled_lets_clashing_hit_through():
+    """Opt-out: with excl_hard_filter=False the same self-screen yields a hit again."""
+    mol, query = _phenol_query_with_excl_at_atom(idx=0)
+    searcher = PharmacophoreSearch(
+        query=query, use_direction=False, excl_hard_filter=False
+    )
+    hits = searcher.screen(mol, progress=False, n_jobs=1)
+    assert len(hits) == 1
+
+
+def test_hard_excl_filter_clear_of_vdw_passes():
+    """An EXCL outside every heavy atom's vdW sphere does not trigger the filter."""
+    mol = _embed("c1ccccc1O", 0xF00D)
+    query = query_pharmacophore_from_molecule(mol)
+    # Place the EXCL 5 A beyond a phenol heavy atom along x — well outside any vdW sphere.
+    pos = mol.GetConformer().GetAtomPosition(0)
+    query.add_point(
+        PharmacophorePoint(
+            type=PointType.EXCL,
+            center=(pos.x + 5.0, pos.y, pos.z),
+        )
+    )
+    searcher = PharmacophoreSearch(query=query, use_direction=False)
+    hits = searcher.screen(mol, progress=False, n_jobs=1)
+    assert len(hits) == 1
+
+
+def test_hard_excl_filter_extra_radius_tightens_check():
+    """Setting excl_clash_radius enlarges the forbidden buffer around each EXCL."""
+    mol = _embed("c1ccccc1O", 0xF00D)
+    query = query_pharmacophore_from_molecule(mol)
+    pos = mol.GetConformer().GetAtomPosition(0)
+    # 2.5 A from a heavy atom is clear of any vdW radius (~1.7 A) by default…
+    query.add_point(
+        PharmacophorePoint(
+            type=PointType.EXCL,
+            center=(pos.x + 2.5, pos.y, pos.z),
+        )
+    )
+    default = PharmacophoreSearch(query=query, use_direction=False)
+    padded = PharmacophoreSearch(
+        query=query, use_direction=False, excl_clash_radius=1.5
+    )
+    assert len(default.screen(mol, progress=False, n_jobs=1)) == 1
+    # …but with a 1.5 A buffer the threshold becomes vdW + 1.5 > 2.5 -> clash.
+    assert padded.screen(mol, progress=False, n_jobs=1) == []
+
+
+def test_hard_excl_filter_negative_radius_raises():
+    query = QueryPharmacophore()
+    with pytest.raises(ValueError, match="excl_clash_radius"):
+        PharmacophoreSearch(query=query, excl_clash_radius=-0.1)
+
+
+def test_hard_excl_filter_parallel_matches_sequential():
+    """Hard filter must apply identically in the sequential and parallel paths."""
+    mol, query = _phenol_query_with_excl_at_atom(idx=0)
+    mols = [mol, _embed("c1ccccc1O", 1), _embed("c1ccccc1O", 2)]
+    searcher = PharmacophoreSearch(query=query, use_direction=False)
+    seq = sorted(i for i, _ in searcher.screen(mols, n_jobs=1, progress=False))
+    par = sorted(i for i, _ in searcher.screen(mols, n_jobs=2, progress=False))
+    assert seq == par
+
+
+def test_no_excl_in_query_skips_filter():
+    """When the query has no EXCL points the filter is a no-op and hits behave normally."""
+    mol = _embed("c1ccccc1O", 0xF00D)
+    query = query_pharmacophore_from_molecule(mol)
+    searcher = PharmacophoreSearch(query=query, use_direction=False)
+    hits = searcher.screen(mol, progress=False, n_jobs=1)
+    assert len(hits) == 1
+
+
+def test_add_excluded_volume_envelope_still_admits_reference_ligand():
+    """An envelope placed ``outside`` the reference vdW surface must not clash with the reference."""
+    mol = _embed("c1ccccc1O", 0xF00D)
+    query = query_pharmacophore_from_molecule(mol)
+    n = add_excluded_volume(
+        mol, query, shell_inner=1.0, shell_outer=2.5, spacing=1.5
+    )
+    assert n > 0
+    searcher = PharmacophoreSearch(query=query, use_direction=False)
+    hits = searcher.screen(mol, progress=False, n_jobs=1)
+    assert len(hits) == 1

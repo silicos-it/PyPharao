@@ -36,11 +36,13 @@ from .volume import volume_overlap
 
 try:
     from .rdkit_perception import (
+        add_excluded_volume,
         molecule_pharmacophore_from_molecule,
         query_pharmacophore_from_molecule,
         query_pharmacophore_from_protein,
     )
 except ImportError:
+    add_excluded_volume = None  # type: ignore[misc, assignment]
     molecule_pharmacophore_from_molecule = None  # type: ignore[misc, assignment]
     query_pharmacophore_from_molecule = None  # type: ignore[misc, assignment]
 
@@ -65,6 +67,7 @@ __all__ = [
     "QueryPharmacophorePerception",
     "TYPE_DESCRIPTIONS",
     "TYPE_HAS_NORMAL",
+    "add_excluded_volume",
     "cosine_normals",
     "count_matchable_query_points",
     "distance",

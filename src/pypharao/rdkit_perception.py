@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import numpy as np
 from rdkit import Chem
 
 from .constants import (
@@ -550,3 +551,125 @@ def molecule_pharmacophore_from_molecule(
     for p in pts:
         ph.add_point(p)
     return ph
+
+
+def add_excluded_volume(
+    mol: Chem.Mol,
+    pharmacophore: Pharmacophore,
+    *,
+    conf_id: int = 0,
+    sigma: float | None = None,
+    shell_inner: float = 1.0,
+    shell_outer: float = 3.0,
+    spacing: float = 1.5,
+    feature_clearance: float = 0.0,
+) -> int:
+    """Add ``EXCL`` points on a shape envelope around a 3D molecule.
+
+    A regular 3D grid is laid out over the bounding box of ``mol`` (heavy
+    atoms only). For each grid point the distance to the *closest heavy-atom
+    vdW surface* is computed (``dist(atom centre) - vdW(atom)``); points
+    whose surface distance falls in the half-open shell
+    ``[shell_inner, shell_outer]`` (in ångström) are appended to
+    ``pharmacophore`` as :class:`PharmacophorePoint` of type
+    :data:`PointType.EXCL`.
+
+    In Pharao scoring an ``EXCL`` query point penalises overlap with the
+    candidate molecule's volume, so placing the spheres on a shell *outside*
+    the reference ligand's surface defines a shape-complementarity envelope:
+    candidate molecules whose features extend beyond that envelope are
+    down-weighted.
+
+    Parameters
+    ----------
+    mol : rdkit.Chem.Mol
+        3D molecule with at least one conformer. Hydrogens are ignored.
+    pharmacophore : Pharmacophore
+        Target pharmacophore. Must allow ``EXCL`` (i.e. a
+        :class:`QueryPharmacophore`); otherwise ``add_point`` raises.
+    conf_id : int, optional
+        Conformer index used for atom coordinates (default ``0``).
+    sigma : float, optional
+        Gaussian width (Å) of each EXCL point. Defaults to
+        ``DEFAULT_SIGMA[PointType.EXCL]`` (1.6 Å).
+    shell_inner, shell_outer : float, optional
+        Inner / outer distance (Å) of the shell, measured from the nearest
+        heavy-atom vdW surface. Defaults: ``1.0`` and ``3.0``. ``shell_inner``
+        must be ``>= 0`` and strictly less than ``shell_outer``.
+    spacing : float, optional
+        Grid step (Å) along each axis (default ``1.5``).
+    feature_clearance : float, optional
+        If ``> 0``, candidate EXCL points within this distance (Å) of an
+        existing pharmacophore feature centre are discarded. Useful when a
+        ligand feature sits at the rim of the envelope and you don't want
+        the shell to overlap it.
+
+    Returns
+    -------
+    int
+        Number of EXCL points actually appended to ``pharmacophore``.
+    """
+    _require_conformer(mol)
+    if shell_inner < 0.0 or shell_outer <= shell_inner:
+        raise ValueError(
+            "shell_inner must be >= 0 and shell_outer must exceed shell_inner"
+        )
+    if spacing <= 0.0:
+        raise ValueError("spacing must be > 0")
+
+    excl_sigma = float(DEFAULT_SIGMA[PointType.EXCL] if sigma is None else sigma)
+
+    conf = mol.GetConformer(conf_id)
+    centers_list: list[tuple[float, float, float]] = []
+    radii_list: list[float] = []
+    for atom in mol.GetAtoms():
+        if atom.GetAtomicNum() == 1:
+            continue
+        p = conf.GetAtomPosition(atom.GetIdx())
+        centers_list.append((p.x, p.y, p.z))
+        radii_list.append(_vdw(atom.GetAtomicNum()))
+    if not centers_list:
+        return 0
+
+    centers = np.asarray(centers_list, dtype=float)               # (Na, 3)
+    radii = np.asarray(radii_list, dtype=float)                   # (Na,)
+
+    pad = float(radii.max()) + shell_outer + spacing
+    lo = centers.min(axis=0) - pad
+    hi = centers.max(axis=0) + pad
+    axes = [
+        np.arange(lo[d], hi[d] + 0.5 * spacing, spacing, dtype=float)
+        for d in range(3)
+    ]
+    gx, gy, gz = np.meshgrid(axes[0], axes[1], axes[2], indexing="ij")
+    grid = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)  # (Ng, 3)
+
+    diff = grid[:, None, :] - centers[None, :, :]                  # (Ng, Na, 3)
+    surf = np.sqrt(np.einsum("gad,gad->ga", diff, diff)) - radii[None, :]
+    min_surf = surf.min(axis=1)                                    # (Ng,)
+    mask = (min_surf >= shell_inner) & (min_surf <= shell_outer)
+
+    if feature_clearance > 0.0:
+        feature_pts = np.asarray(
+            [
+                (p.x, p.y, p.z)
+                for p in pharmacophore
+                if p.type != PointType.EXCL
+            ],
+            dtype=float,
+        )
+        if feature_pts.size:
+            fdiff = grid[:, None, :] - feature_pts[None, :, :]     # (Ng, Nf, 3)
+            min_fdist_sq = np.einsum("gfd,gfd->gf", fdiff, fdiff).min(axis=1)
+            mask &= min_fdist_sq >= feature_clearance * feature_clearance
+
+    survivors = grid[mask]
+    for x, y, z in survivors:
+        pharmacophore.add_point(
+            PharmacophorePoint(
+                type=PointType.EXCL,
+                center=(float(x), float(y), float(z)),
+                sigma=excl_sigma,
+            )
+        )
+    return int(survivors.shape[0])

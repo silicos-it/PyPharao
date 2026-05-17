@@ -36,6 +36,9 @@ examples/top_hits_ph_1.sdf
 examples/top_hits_ph_2.pdb
 examples/top_hits_ph_2.sdf
 examples/paracetamol_hits.sdf
+examples/top_hits_phenol_excl.sdf
+examples/top_hits_phenol_excl.pdb
+examples/phenol_with_excl.pdb
 
 # Type checkers / linters
 .mypy_cache/
