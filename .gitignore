@@ -30,6 +30,13 @@ htmlcov/
 coverage.xml
 *.cover
 
+# Output sdf or pdb files
+examples/top_hits_ph_1.pdb
+examples/top_hits_ph_1.sdf
+examples/top_hits_ph_2.pdb
+examples/top_hits_ph_2.sdf
+examples/paracetamol_hits.sdf
+
 # Type checkers / linters
 .mypy_cache/
 .ruff_cache/
