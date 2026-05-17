@@ -54,12 +54,14 @@ A **pharmacophore search** consists of one **query pharmacophore** and one or mo
 
 A point is one Gaussian feature site. It has four public attributes:
 
-| Attribute | Type                                  | Meaning                                                          |
-| --------- | ------------------------------------- | ---------------------------------------------------------------- |
-| `type`    | `PointType`                           | Feature type (also exposed as `PharmacophorePoint.Type`).        |
-| `center`  | `(x, y, z)` floats in ångström        | Location.                                                        |
-| `sigma`   | `float` (ångström)                    | Gaussian width.                                                  |
-| `normal`  | `(nx, ny, nz)` floats or `None`       | Absolute tip coordinates of the feature normal (Pharao convention) for types that carry one; `None` otherwise. |
+
+| Attribute | Type                            | Meaning                                                                                                        |
+| --------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `type`    | `PointType`                     | Feature type (also exposed as `PharmacophorePoint.Type`).                                                      |
+| `center`  | `(x, y, z)` floats in ångström  | Location.                                                                                                      |
+| `sigma`   | `float` (ångström)              | Gaussian width.                                                                                                |
+| `normal`  | `(nx, ny, nz)` floats or `None` | Absolute tip coordinates of the feature normal (Pharao convention) for types that carry one; `None` otherwise. |
+
 
 Points are immutable; use `point.replace(...)` to derive a modified copy.
 
@@ -70,19 +72,21 @@ q = p.replace(center=(1, 0, 0))   # new sigma defaults are filled in for you
 
 ### `PointType` table
 
-| Type             | Default sigma | Normal | Description                                                  |
-| ---------------- | ------------- | ------ | ------------------------------------------------------------ |
-| `AROM`           | 0.7           | yes    | Aromatic ring centroids with plane normals                   |
-| `LIPO`           | 0.7           | no     | Lipophilic regions (from molecular surface), no aromatics    |
-| `AROM_OR_LIPO`   | 0.7           | yes    | Either an AROM or a LIPO group, or both (query only)         |
-| `HDON`           | 1.0           | no     | H-bond donors (N/O with H, not negatively charged)           |
-| `HACC`           | 1.0           | no     | H-bond acceptors (N/O, with Pharao-style filters)            |
-| `HACC_AND_HDON`  | 1.0           | no     | Both a HACC and an HDON at the same site                     |
-| `HACC_OR_HDON`   | 1.0           | no     | Either an HACC or an HDON group (query only)                 |
-| `POSC`           | 1.0           | no     | Positively charged atoms                                     |
-| `NEGC`           | 1.0           | no     | Negatively charged atoms                                     |
-| `EXCL`           | 1.6           | no     | Exclusion sphere (query only; penalises overlap)             |
-| `UNDEF`          | 1.0           | no     | Undefined placeholder (matches any molecule feature type)    |
+
+| Type            | Default sigma | Normal | Description                                               |
+| --------------- | ------------- | ------ | --------------------------------------------------------- |
+| `AROM`          | 0.7           | yes    | Aromatic ring centroids with plane normals                |
+| `LIPO`          | 0.7           | no     | Lipophilic regions (from molecular surface), no aromatics |
+| `AROM_OR_LIPO`  | 0.7           | yes    | Either an AROM or a LIPO group, or both (query only)      |
+| `HDON`          | 1.0           | no     | H-bond donors (N/O with H, not negatively charged)        |
+| `HACC`          | 1.0           | no     | H-bond acceptors (N/O, with Pharao-style filters)         |
+| `HACC_AND_HDON` | 1.0           | no     | Both a HACC and an HDON at the same site                  |
+| `HACC_OR_HDON`  | 1.0           | no     | Either an HACC or an HDON group (query only)              |
+| `POSC`          | 1.0           | no     | Positively charged atoms                                  |
+| `NEGC`          | 1.0           | no     | Negatively charged atoms                                  |
+| `EXCL`          | 1.6           | no     | Exclusion sphere (query only; penalises overlap)          |
+| `UNDEF`         | 1.0           | no     | Undefined placeholder (matches any molecule feature type) |
+
 
 `PointType` enum members and their underlying `.value` strings both use the underscored spellings (`PointType.AROM_OR_LIPO`, `PointType.HACC_AND_HDON`, `PointType.HACC_OR_HDON`).
 
@@ -90,10 +94,12 @@ The defaults are available as `DEFAULT_SIGMA[PointType.X]` and `TYPE_HAS_NORMAL[
 
 ### Allowed types per subclass
 
-|                          | Allowed `PointType`s                                                          |
-| ------------------------ | ----------------------------------------------------------------------------- |
-| `QueryPharmacophore`     | every `PointType` (including `EXCL`, `UNDEF`, `AROM_OR_LIPO`, `HACC_OR_HDON`, `HACC_AND_HDON`) |
-| `MoleculePharmacophore`  | `AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC`                           |
+
+|                         | Allowed `PointType`s                                                                           |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `QueryPharmacophore`    | every `PointType` (including `EXCL`, `UNDEF`, `AROM_OR_LIPO`, `HACC_OR_HDON`, `HACC_AND_HDON`) |
+| `MoleculePharmacophore` | `AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC`                                            |
+
 
 Adding a point of a disallowed type raises `ValueError`.
 
@@ -133,18 +139,22 @@ q.get_name()
 
 **Fields**
 
-| Name | Type | Notes |
-|---|---|---|
-| `type` | `PointType` | Coerced from `str` at construction if needed. |
-| `x`, `y`, `z` | `float` | Centre coordinates, ångström. |
-| `sigma` | `float` | Gaussian width, ångström. Defaults to `DEFAULT_SIGMA[type]` if omitted at construction. |
-| `nx`, `ny`, `nz` | `float` | Absolute tip coordinates of the feature normal (Pharao convention). All `0.0` for types without a normal. |
+
+| Name             | Type        | Notes                                                                                                     |
+| ---------------- | ----------- | --------------------------------------------------------------------------------------------------------- |
+| `type`           | `PointType` | Coerced from `str` at construction if needed.                                                             |
+| `x`, `y`, `z`    | `float`     | Centre coordinates, ångström.                                                                             |
+| `sigma`          | `float`     | Gaussian width, ångström. Defaults to `DEFAULT_SIGMA[type]` if omitted at construction.                   |
+| `nx`, `ny`, `nz` | `float`     | Absolute tip coordinates of the feature normal (Pharao convention). All `0.0` for types without a normal. |
+
 
 **Class attribute**
 
-| Name | Purpose |
-|---|---|
+
+| Name                | Purpose                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------- |
 | `Type` (`ClassVar`) | Alias for the `PointType` enum (so `PharmacophorePoint.Type.AROM` is `PointType.AROM`). |
+
 
 **Constructor**
 
@@ -159,26 +169,32 @@ PharmacophorePoint(
 
 **Properties (read-only)**
 
-| Property | Returns |
-|---|---|
-| `center` | `(x, y, z)` tuple. |
-| `normal` | `(nx, ny, nz)` tuple for types that carry a normal, else `None`. |
-| `has_normal` | `bool` — shortcut for `TYPE_HAS_NORMAL[self.type]`. |
+
+| Property     | Returns                                                          |
+| ------------ | ---------------------------------------------------------------- |
+| `center`     | `(x, y, z)` tuple.                                               |
+| `normal`     | `(nx, ny, nz)` tuple for types that carry a normal, else `None`. |
+| `has_normal` | `bool` — shortcut for `TYPE_HAS_NORMAL[self.type]`.              |
+
 
 **Methods**
 
-| Method | Purpose |
-|---|---|
+
+| Method                                                        | Purpose                                                                                                                                                                                                                             |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `replace(*, type=None, center=None, sigma=None, normal=None)` | Returns a **new** `PharmacophorePoint` with selected fields updated (keyword-only). If `type` changes to one that doesn't carry a normal, the new normal is zeroed; if it does and you don't pass one, the old normal is preserved. |
+
 
 **Auto-generated by `@dataclass(frozen=True)`**
 
-| Member | Behaviour |
-|---|---|
-| `__eq__` | Structural equality across all eight fields. |
-| `__hash__` | Hashable (because `frozen=True`). |
-| `__repr__` | `PharmacophorePoint(type=…, x=…, y=…, z=…, sigma=…, nx=…, ny=…, nz=…)`. |
-| `__setattr__` *(blocked)* | Raises `FrozenInstanceError` — instances are immutable. |
+
+| Member                    | Behaviour                                                               |
+| ------------------------- | ----------------------------------------------------------------------- |
+| `__eq__`                  | Structural equality across all eight fields.                            |
+| `__hash__`                | Hashable (because `frozen=True`).                                       |
+| `__repr__`                | `PharmacophorePoint(type=…, x=…, y=…, z=…, sigma=…, nx=…, ny=…, nz=…)`. |
+| `__setattr__` *(blocked)* | Raises `FrozenInstanceError` — instances are immutable.                 |
+
 
 ### `Pharmacophore` API reference
 
@@ -186,81 +202,99 @@ The tables below list everything available on a `Pharmacophore` (and its `QueryP
 
 **Class attributes**
 
-| Name | Type | Purpose |
-|---|---|---|
-| `allowed_types` | `ClassVar[frozenset[PointType]]` | Which point types may be added. |
-| `kind` | `ClassVar[str]` | Tag stored in JSON (`"query"` / `"molecule"`); used to round-trip the subclass. |
+
+| Name            | Type                             | Purpose                                                                         |
+| --------------- | -------------------------------- | ------------------------------------------------------------------------------- |
+| `allowed_types` | `ClassVar[frozenset[PointType]]` | Which point types may be added.                                                 |
+| `kind`          | `ClassVar[str]`                  | Tag stored in JSON (`"query"` / `"molecule"`); used to round-trip the subclass. |
+
 
 **Iteration and indexing**
 
-| Member | Behaviour |
-|---|---|
+
+| Member              | Behaviour                                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------- |
 | `points` (property) | Returns a *snapshot* `list[PharmacophorePoint]`; mutating the list does **not** mutate the pharmacophore. |
-| `len(ph)` | Number of points. |
-| `for p in ph: ...` | Iterate points in order. |
-| `ph[i]` | Get the `PharmacophorePoint` at index `i`. |
+| `len(ph)`           | Number of points.                                                                                         |
+| `for p in ph: ...`  | Iterate points in order.                                                                                  |
+| `ph[i]`             | Get the `PharmacophorePoint` at index `i`.                                                                |
+
 
 **Editing points**
 
-| Method | Signature | Notes |
-|---|---|---|
-| `add_point` | `(point)` | Append after validating type. |
-| `set_point` | `(idx, point)` | Replace at `idx` after validating type. |
+
+| Method         | Signature          | Notes                                                                                                          |
+| -------------- | ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `add_point`    | `(point)`          | Append after validating type.                                                                                  |
+| `set_point`    | `(idx, point)`     | Replace at `idx` after validating type.                                                                        |
 | `update_point` | `(idx, **changes)` | Shorthand for `set_point(idx, self[idx].replace(**changes))`. Accepts `type=`, `center=`, `sigma=`, `normal=`. |
-| `remove_point` | `(idx)` | Delete the point at `idx`. |
-| `clear` | `()` | Remove every point. |
+| `remove_point` | `(idx)`            | Delete the point at `idx`.                                                                                     |
+| `clear`        | `()`               | Remove every point.                                                                                            |
+
 
 **Copying**
 
-| Method | Returns |
-|---|---|
+
+| Method   | Returns                                                                                                                                                                                 |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `copy()` | Shallow copy preserving the subclass and (for `QueryPharmacophore`) the name. The `_points` list is new; `PharmacophorePoint` objects are shared (they are immutable, so this is safe). |
+
 
 **JSON I/O**
 
-| Method | Direction | Returns / accepts |
-|---|---|---|
-| `to_json_dict()` | export | `dict[str, Any]` |
-| `to_json(**kwargs)` | export | `str` (kwargs forwarded to `json.dumps`) |
-| `write_json(path, **kwargs)` | export | writes UTF-8 file |
-| `from_json_dict(d)` *(classmethod)* | import | round-trips the right subclass via `kind` |
-| `from_json(s)` *(classmethod)* | import | parses a JSON string |
-| `from_json_file(path)` *(classmethod)* | import | reads a JSON file |
+
+| Method                                 | Direction | Returns / accepts                         |
+| -------------------------------------- | --------- | ----------------------------------------- |
+| `to_json_dict()`                       | export    | `dict[str, Any]`                          |
+| `to_json(**kwargs)`                    | export    | `str` (kwargs forwarded to `json.dumps`)  |
+| `write_json(path, **kwargs)`           | export    | writes UTF-8 file                         |
+| `from_json_dict(d)` *(classmethod)*    | import    | round-trips the right subclass via `kind` |
+| `from_json(s)` *(classmethod)*         | import    | parses a JSON string                      |
+| `from_json_file(path)` *(classmethod)* | import    | reads a JSON file                         |
+
 
 **Pharao `.phar` text I/O**
 
-| Method | Direction |
-|---|---|
-| `to_phar_text()` | export `str` in Pharao `.phar` format |
-| `write_phar(path)` | write `.phar` to disk |
-| `from_phar_text(text)` *(classmethod)* | parse a `.phar` string |
-| `read_phar(path)` *(classmethod)* | read a `.phar` file |
+
+| Method                                 | Direction                             |
+| -------------------------------------- | ------------------------------------- |
+| `to_phar_text()`                       | export `str` in Pharao `.phar` format |
+| `write_phar(path)`                     | write `.phar` to disk                 |
+| `from_phar_text(text)` *(classmethod)* | parse a `.phar` string                |
+| `read_phar(path)` *(classmethod)*      | read a `.phar` file                   |
+
 
 **SDF / PDB I/O (requires RDKit, export only)**
 
-| Method | Direction |
-|---|---|
+
+| Method                          | Direction                                                                                                                                                |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `write_sdf(path, *, name=None)` | write a single-record SDF (one pseudo-atom per feature, plus per-mol properties `kind`, `name`, `num_features`, `types`, `sigmas`, `centers`, `normals`) |
-| `write_pdb(path, *, name=None)` | write a PDB with one `HETATM` per feature; the residue name encodes the feature type (`ARO`, `LIP`, `HDO`, `HAC`, `DAC`, ...) |
+| `write_pdb(path, *, name=None)` | write a PDB with one `HETATM` per feature; the residue name encodes the feature type (`ARO`, `LIP`, `HDO`, `HAC`, `DAC`, ...)                            |
 
-Both methods reuse `pharmacophore_to_mol` so the format matches what the multi-record [`write_hits_sdf` / `write_hits_pdb`](#writing-hits-to-an-sdf-or-pdb-file) writers produce. SDF/PDB are export-only; round-trip back to a `Pharmacophore` is not supported (use JSON or `.phar` for that).
 
-**`QueryPharmacophore` extras**
+Both methods reuse `pharmacophore_to_mol` so the format matches what the multi-record `[write_hits_sdf` / `write_hits_pdb](#writing-hits-to-an-sdf-or-pdb-file)` writers produce. SDF/PDB are export-only; round-trip back to a `Pharmacophore` is not supported (use JSON or `.phar` for that).
 
-| Member | Kind |
-|---|---|
+`**QueryPharmacophore` extras**
+
+
+| Member                           | Kind                   |
+| -------------------------------- | ---------------------- |
 | `__init__(points=None, name="")` | overridden constructor |
-| `get_name()` / `set_name(name)` | explicit accessors |
-| `name` | property + setter |
+| `get_name()` / `set_name(name)`  | explicit accessors     |
+| `name`                           | property + setter      |
+
 
 `MoleculePharmacophore` adds no methods; it narrows `allowed_types` to `{AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC}`.
 
 **Module-level helpers**
 
-| Function | Purpose |
-|---|---|
-| `distance(p, q)` | Euclidean distance between two `PharmacophorePoint` centres. |
+
+| Function               | Purpose                                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `distance(p, q)`       | Euclidean distance between two `PharmacophorePoint` centres.                                              |
 | `cosine_normals(p, q)` | Cosine between the (relative) normal vectors of `p` and `q`; returns `0.0` if either point has no normal. |
+
 
 ### Generating query pharmacophores
 
@@ -317,7 +351,7 @@ Both subclasses cover the same seven auto-perceivable types and default to *all 
 AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC
 ```
 
-`AROM` and `LIPO` are mutually exclusive at perception time: an aromatic ring is reported only as `AROM`, while a lipophilic moiety that is *not* aromatic is reported as `LIPO`. `EXCL`, `UNDEF`, `AROM_OR_LIPO` and `HACC_OR_HDON` are never auto-perceived; introduce them by hand on the resulting `QueryPharmacophore` (typically by converting an `AROM`/`LIPO` point to `AROM_OR_LIPO` or an `HDON`/`HACC` pair to `HACC_OR_HDON` — see `examples/03-modifying-pharmacophores.py`). The base `PharmacophorePerception` is abstract — instantiate one of the two subclasses instead.
+`AROM` and `LIPO` are mutually exclusive at perception time: an aromatic ring is reported only as `AROM`, while a lipophilic moiety that is *not* aromatic is reported as `LIPO`. `EXCL`, `UNDEF`, `AROM_OR_LIPO` and `HACC_OR_HDON` are never auto-perceived; introduce them by hand on the resulting `QueryPharmacophore` (e.g. by converting an `AROM`/`LIPO` point to `AROM_OR_LIPO` or an `HDON`/`HACC` pair to `HACC_OR_HDON`, or by placing `EXCL` spheres around the molecule — see `examples/03-excluded-volumes.py`). The base `PharmacophorePerception` is abstract — instantiate one of the two subclasses instead.
 
 ### API
 
@@ -352,45 +386,55 @@ searcher = PharmacophoreSearch(query, perception=opts)  # custom molecule percep
 
 **Fields (= constructor parameters)**
 
-| Name | Type | Default | Purpose |
-|---|---|---|---|
-| `query` | `QueryPharmacophore` | *(required)* | Query pharmacophore. A `TypeError` is raised at construction if this isn't a `QueryPharmacophore`. |
-| `perception` | `MoleculePharmacophorePerception \| None` | `None` | How database molecules are perceived. `None` ⇒ a default `MoleculePharmacophorePerception()` is created in `__post_init__`. |
-| `epsilon` | `float` | `0.5` | Tolerance used by `FunctionMapping` when proposing candidate feature mappings. |
-| `use_direction` | `bool` | `True` | Use feature normals (AROM / AROM_OR_LIPO) in volume scoring and alignment. |
-| `with_exclusion` | `bool` | `True` | Include `EXCL` spheres when scoring (penalises overlap with database features). |
-| `early_exit_score` | `float` | `0.98` | Tanimoto threshold above which the search stops exploring further mappings. |
+
+| Name               | Type                                     | Default      | Purpose                                                                                                                     |
+| ------------------ | ---------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `query`            | `QueryPharmacophore`                     | *(required)* | Query pharmacophore. A `TypeError` is raised at construction if this isn't a `QueryPharmacophore`.                          |
+| `perception`       | `MoleculePharmacophorePerception | None` | `None`       | How database molecules are perceived. `None` ⇒ a default `MoleculePharmacophorePerception()` is created in `__post_init__`. |
+| `epsilon`          | `float`                                  | `0.5`        | Tolerance used by `FunctionMapping` when proposing candidate feature mappings.                                              |
+| `use_direction`    | `bool`                                   | `True`       | Use feature normals (AROM / AROM_OR_LIPO) in volume scoring and alignment.                                                  |
+| `with_exclusion`   | `bool`                                   | `True`       | Include `EXCL` spheres when scoring (penalises overlap with database features).                                             |
+| `early_exit_score` | `float`                                  | `0.98`       | Tanimoto threshold above which the search stops exploring further mappings.                                                 |
+
 
 **Public methods**
 
-| Method | Purpose |
-|---|---|
-| `screen(mols, *, conformations='all', min_matches=0, keep='best', metric='tanimoto', n_jobs=0, progress=True)` | The single public entry point. See [`screen()` parameters](#screen-parameters) below for the full breakdown. Returns `list[tuple[int, MatchResult]]`. |
+
+| Method                                                                                                         | Purpose                                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `screen(mols, *, conformations='all', min_matches=0, keep='best', metric='tanimoto', n_jobs=0, progress=True)` | The single public entry point. See `[screen()` parameters](#screen-parameters) below for the full breakdown. Returns `list[tuple[int, MatchResult]]`. |
+
 
 **Private / internal methods** (prefixed with `_`, not part of the supported API)
 
-| Method | Role |
-|---|---|
-| `__post_init__()` | Dataclass hook — validates `query` and fills in a default `perception`. |
-| `_search_with_alignment(query, db, min_matches)` | Core alignment loop: enumerate candidate function mappings via `FunctionMapping`, run `Alignment.align`, score, early-exit. Returns `(MatchResult, SolutionInfo)`. |
-| `_screen_one_mol(mol, *, conformations, min_matches, keep, metric)` | Iterates conformers of one molecule, calls `_search_with_alignment` per conformer, applies the `keep`/`metric` selection. |
+
+| Method                                                              | Role                                                                                                                                                               |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `__post_init__()`                                                   | Dataclass hook — validates `query` and fills in a default `perception`.                                                                                            |
+| `_search_with_alignment(query, db, min_matches)`                    | Core alignment loop: enumerate candidate function mappings via `FunctionMapping`, run `Alignment.align`, score, early-exit. Returns `(MatchResult, SolutionInfo)`. |
+| `_screen_one_mol(mol, *, conformations, min_matches, keep, metric)` | Iterates conformers of one molecule, calls `_search_with_alignment` per conformer, applies the `keep`/`metric` selection.                                          |
+
 
 **Auto-generated by `@dataclass`**
 
-| Member | Behaviour |
-|---|---|
-| `__init__` | Built from the six fields above (positional or keyword). |
-| `__eq__` | Structural equality across the six fields. |
+
+| Member     | Behaviour                                                    |
+| ---------- | ------------------------------------------------------------ |
+| `__init__` | Built from the six fields above (positional or keyword).     |
+| `__eq__`   | Structural equality across the six fields.                   |
 | `__repr__` | `PharmacophoreSearch(query=…, perception=…, epsilon=0.5, …)` |
+
 
 **Module-level helpers used alongside `PharmacophoreSearch`** (re-exported by `from pypharao import *`)
 
-| Name | Purpose |
-|---|---|
-| `MatchResult` | Dataclass returned by `screen()`. See [§5 *Analysing the results*](#5-analysing-the-results). |
-| `sort_match_results(hits, sort=..., key=...)` | Sort hits by any metric. |
-| `print_match_results(hits, limit=...)` | Pretty-print hits as a table. |
-| `count_matchable_query_points(query)` | Resolved value when `min_matches=0`; counts query points other than `EXCL` / `UNDEF`. |
+
+| Name                                          | Purpose                                                                                       |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `MatchResult`                                 | Dataclass returned by `screen()`. See [§5 *Analysing the results](#5-analysing-the-results)*. |
+| `sort_match_results(hits, sort=..., key=...)` | Sort hits by any metric.                                                                      |
+| `print_match_results(hits, limit=...)`        | Pretty-print hits as a table.                                                                 |
+| `count_matchable_query_points(query)`         | Resolved value when `min_matches=0`; counts query points other than `EXCL` / `UNDEF`.         |
+
 
 ### `screen()` parameters
 
@@ -406,15 +450,17 @@ hits = searcher.screen(
 )
 ```
 
-| Argument         | Default       | Description                                                                                                  |
-| ---------------- | ------------- | ------------------------------------------------------------------------------------------------------------ |
-| `mols`           | —             | A single `Chem.Mol`, a list of `Chem.Mol`, or a list of tuples whose last element is a mol (the first element becomes the reported hit index, e.g. `(line_idx, smiles, mol)`). |
-| `conformations`  | `"all"`       | `"all"` iterates every conformer of each molecule; `"single"` uses only the first; a positive `int N` uses the first N. |
-| `min_matches`    | `0`           | Minimum number of query points that must map to a molecule feature for a hit. A value of `0` (the default) is auto-resolved to `count_matchable_query_points(query)` (every point that is not `EXCL` / `UNDEF`). Negative values or values exceeding the matchable count raise `ValueError`. |
-| `keep`           | `"best"`      | `"best"` keeps the single highest-scoring conformer per molecule; `"all"` keeps every conformer that satisfies `min_matches` (each result records the matching `conf_id`). |
-| `metric`         | `"tanimoto"`  | Tie-breaker for `keep="best"`. One of `tanimoto`, `overlap_volume`, `excl_volume`, `tversky_ref`, `tversky_db`. Maximised, except `excl_volume` which is minimised. |
-| `n_jobs`         | `0`           | Worker processes; `0` uses all CPUs, `1` runs sequentially.                                                  |
-| `progress`       | `True`        | Show a tqdm progress bar (requires `tqdm`).                                                                  |
+
+| Argument        | Default      | Description                                                                                                                                                                                                                                                                                  |
+| --------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mols`          | —            | A single `Chem.Mol`, a list of `Chem.Mol`, or a list of tuples whose last element is a mol (the first element becomes the reported hit index, e.g. `(line_idx, smiles, mol)`).                                                                                                               |
+| `conformations` | `"all"`      | `"all"` iterates every conformer of each molecule; `"single"` uses only the first; a positive `int N` uses the first N.                                                                                                                                                                      |
+| `min_matches`   | `0`          | Minimum number of query points that must map to a molecule feature for a hit. A value of `0` (the default) is auto-resolved to `count_matchable_query_points(query)` (every point that is not `EXCL` / `UNDEF`). Negative values or values exceeding the matchable count raise `ValueError`. |
+| `keep`          | `"best"`     | `"best"` keeps the single highest-scoring conformer per molecule; `"all"` keeps every conformer that satisfies `min_matches` (each result records the matching `conf_id`).                                                                                                                   |
+| `metric`        | `"tanimoto"` | Tie-breaker for `keep="best"`. One of `tanimoto`, `overlap_volume`, `excl_volume`, `tversky_ref`, `tversky_db`. Maximised, except `excl_volume` which is minimised.                                                                                                                          |
+| `n_jobs`        | `0`          | Worker processes; `0` uses all CPUs, `1` runs sequentially.                                                                                                                                                                                                                                  |
+| `progress`      | `True`       | Show a tqdm progress bar (requires `tqdm`).                                                                                                                                                                                                                                                  |
+
 
 `screen()` **always** returns `list[tuple[int, MatchResult]]`. A single molecule with no match returns `[]`; a successful match returns `[(index, MatchResult)]`. With `keep="all"` a single molecule may produce several rows (one per matching conformer), and the same `index` is repeated.
 
@@ -422,20 +468,22 @@ hits = searcher.screen(
 
 ### `MatchResult` attributes
 
-| Attribute                  | Type                    | Description                                                                                  |
-| -------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
-| `conf_id`                  | `int`                   | Conformer id of the input molecule that produced this match (`0` for single-conformer mols). |
-| `ref_volume`               | `float`                 | Self-overlap volume of the query pharmacophore.                                              |
-| `db_volume`                | `float`                 | Self-overlap volume of the molecule pharmacophore.                                           |
-| `overlap_volume`           | `float`                 | Raw overlap volume between matched (query, molecule) pairs before subtracting exclusion overlap. |
+
+| Attribute                  | Type                    | Description                                                                                           |
+| -------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `conf_id`                  | `int`                   | Conformer id of the input molecule that produced this match (`0` for single-conformer mols).          |
+| `ref_volume`               | `float`                 | Self-overlap volume of the query pharmacophore.                                                       |
+| `db_volume`                | `float`                 | Self-overlap volume of the molecule pharmacophore.                                                    |
+| `overlap_volume`           | `float`                 | Raw overlap volume between matched (query, molecule) pairs before subtracting exclusion overlap.      |
 | `excl_volume`              | `float`                 | Overlap volume between query `EXCL` points and molecule features (subtracted from the aligned score). |
-| `tanimoto`                 | `float`                 | `aligned_overlap / (ref_volume + db_volume − aligned_overlap)`.                              |
-| `tversky_ref`              | `float`                 | `aligned_overlap / ref_volume`.                                                              |
-| `tversky_db`               | `float`                 | `aligned_overlap / db_volume`.                                                               |
-| `mapping`                  | `list[tuple[int, int]]` | Matched feature pairs as `(query_index, molecule_index)` into the original point lists.       |
-| `database_pharmacophore`   | `MoleculePharmacophore` | Molecule pharmacophore perceived for this conformer (before alignment).                      |
-| `matched_db_pharmacophore` | `MoleculePharmacophore` | Subset of molecule features that appear in `mapping`, transformed into the query frame.       |
-| `aligned_mol`              | `Chem.Mol \| None`      | Copy of the input molecule with the matching conformer transformed into the query frame.     |
+| `tanimoto`                 | `float`                 | `aligned_overlap / (ref_volume + db_volume − aligned_overlap)`.                                       |
+| `tversky_ref`              | `float`                 | `aligned_overlap / ref_volume`.                                                                       |
+| `tversky_db`               | `float`                 | `aligned_overlap / db_volume`.                                                                        |
+| `mapping`                  | `list[tuple[int, int]]` | Matched feature pairs as `(query_index, molecule_index)` into the original point lists.               |
+| `database_pharmacophore`   | `MoleculePharmacophore` | Molecule pharmacophore perceived for this conformer (before alignment).                               |
+| `matched_db_pharmacophore` | `MoleculePharmacophore` | Subset of molecule features that appear in `mapping`, transformed into the query frame.               |
+| `aligned_mol`              | `Chem.Mol | None`       | Copy of the input molecule with the matching conformer transformed into the query frame.              |
+
 
 ### Sorting and printing
 
@@ -465,6 +513,7 @@ When `pharmacophore=` is supplied, the pharmacophore is rendered (one pseudo-ato
 
 The pseudo-atom convention (configurable via `pharmacophore_to_mol`):
 
+
 | `PointType`     | Element | PDB residue name |
 | --------------- | ------- | ---------------- |
 | `AROM`          | C       | `ARO`            |
@@ -478,6 +527,7 @@ The pseudo-atom convention (configurable via `pharmacophore_to_mol`):
 | `NEGC`          | Cl      | `NEG`            |
 | `EXCL`          | F       | `EXC`            |
 | `UNDEF`         | He      | `UND`            |
+
 
 Both writers skip hits with no aligned molecule (one-line warning to `stderr`) and return the total number of records / `MODEL`s written, including the pharmacophore record when one was passed in.
 
