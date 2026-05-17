@@ -191,6 +191,23 @@ class PharmacophorePoint:
 
 _JSON_VERSION = 2
 
+# Decimal places for floats written to `.phar` and JSON (centres, sigma, normals).
+_IO_FLOAT_DECIMAL_PLACES = 5
+
+# Column layout for `.phar` body lines (space-separated fields; see :meth:`Pharmacophore.to_phar_text`).
+_PHAR_TYPE_FIELD_WIDTH = max(len(t.value) for t in PointType)
+_PHAR_FLOAT_FIELD_WIDTH = 13
+
+
+def _quantize_io_float(x: float) -> float:
+    return round(float(x), _IO_FLOAT_DECIMAL_PLACES)
+
+
+def _phar_float_field(x: float) -> str:
+    return (
+        f"{_quantize_io_float(x):>{_PHAR_FLOAT_FIELD_WIDTH}.{_IO_FLOAT_DECIMAL_PLACES}f}"
+    )
+
 
 class Pharmacophore:
     """Ordered collection of :class:`PharmacophorePoint`.
@@ -278,13 +295,13 @@ class Pharmacophore:
             "points": [
                 {
                     "type": p.type.value,
-                    "x": p.x,
-                    "y": p.y,
-                    "z": p.z,
-                    "sigma": p.sigma,
-                    "nx": p.nx,
-                    "ny": p.ny,
-                    "nz": p.nz,
+                    "x": _quantize_io_float(p.x),
+                    "y": _quantize_io_float(p.y),
+                    "z": _quantize_io_float(p.z),
+                    "sigma": _quantize_io_float(p.sigma),
+                    "nx": _quantize_io_float(p.nx),
+                    "ny": _quantize_io_float(p.ny),
+                    "nz": _quantize_io_float(p.nz),
                 }
                 for p in self._points
             ],
@@ -294,13 +311,25 @@ class Pharmacophore:
         return d
 
     def to_json(self, **kwargs: Any) -> str:
+        """Serialise to JSON. Passes keyword arguments to :func:`json.dumps`.
+
+        By default ``indent=2`` is set so output is multi-line and readable;
+        pass ``indent=None`` for a single-line dump.
+        """
+        kwargs.setdefault("indent", 2)
         return json.dumps(self.to_json_dict(), **kwargs)
 
     def write_json(self, path: str | Path, **kwargs: Any) -> None:
+        """Write UTF-8 JSON (same defaults as :meth:`to_json`)."""
         Path(path).write_text(self.to_json(**kwargs), encoding="utf-8")
 
     @classmethod
     def from_json_dict(cls, d: dict[str, Any]) -> Pharmacophore:
+        """Build and return a **new** pharmacophore from a decoded JSON dict.
+
+        Does not mutate any existing instance. Subclass follows ``kind`` in ``d``
+        when ``cls`` is :class:`Pharmacophore`.
+        """
         kind = d.get("kind", "query")
         target_cls = cls
         if cls is Pharmacophore:
@@ -331,21 +360,38 @@ class Pharmacophore:
 
     @classmethod
     def from_json(cls, s: str) -> Pharmacophore:
+        """Return a **new** pharmacophore parsed from the JSON string ``s``."""
         return cls.from_json_dict(json.loads(s))
 
     @classmethod
-    def from_json_file(cls, path: str | Path) -> Pharmacophore:
+    def read_json(cls, path: str | Path) -> Pharmacophore:
+        """Return a **new** pharmacophore loaded from ``path`` (UTF-8 JSON)."""
         return cls.from_json_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
     def to_phar_text(self) -> str:
+        """Serialise to Pharao-style ``.phar`` text (name line, points, ``$$$$``).
+
+        Point lines use a fixed-width feature-type column and fixed-width numeric
+        columns so short and long type names (e.g. ``HACC`` vs ``HACC_AND_HDON``)
+        keep coordinates aligned. Fields are whitespace-separated; parsing uses
+        :meth:`from_phar_text`.
+        """
         header = getattr(self, "_name", "") or ""
         lines = [header]
         for p in self._points:
             nflag = "1" if p.has_normal else "0"
-            lines.append(
-                f"{p.type.value}\t{p.x}\t{p.y}\t{p.z}\t{p.sigma}\t{nflag}\t"
-                f"{p.nx}\t{p.ny}\t{p.nz}"
-            )
+            typ = f"{p.type.value:<{_PHAR_TYPE_FIELD_WIDTH}}"
+            cols = [
+                _phar_float_field(p.x),
+                _phar_float_field(p.y),
+                _phar_float_field(p.z),
+                _phar_float_field(p.sigma),
+                f"{nflag:>3}",
+                _phar_float_field(p.nx),
+                _phar_float_field(p.ny),
+                _phar_float_field(p.nz),
+            ]
+            lines.append(f"{typ}  {' '.join(cols)}")
         lines.append("$$$$")
         return "\n".join(lines) + "\n"
 
@@ -414,6 +460,10 @@ class Pharmacophore:
 
     @classmethod
     def from_phar_text(cls, text: str) -> Pharmacophore:
+        """Build and return a **new** pharmacophore from Pharao ``.phar`` text.
+
+        Does not mutate any existing instance.
+        """
         lines = [ln.strip() for ln in text.splitlines() if not ln.startswith("#")]
         target_cls = cls if cls is not Pharmacophore else QueryPharmacophore
         ph = target_cls()
@@ -446,6 +496,7 @@ class Pharmacophore:
 
     @classmethod
     def read_phar(cls, path: str | Path) -> Pharmacophore:
+        """Return a **new** pharmacophore read from ``path`` (UTF-8 ``.phar``)."""
         return cls.from_phar_text(Path(path).read_text(encoding="utf-8"))
 
 

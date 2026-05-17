@@ -9,6 +9,37 @@ from pypharao import (
 )
 
 
+def test_json_serialisation_rounds_numeric_fields_to_five_decimals():
+    q = QueryPharmacophore(name="prec")
+    q.add_point(
+        PharmacophorePoint(
+            type=PointType.HACC,
+            center=(1.234567891, 2.0, -3.987654321),
+            sigma=0.333333333,
+        )
+    )
+    js = q.to_json()
+    assert '"x": 1.23457' in js
+    assert '"z": -3.98765' in js
+    assert '"sigma": 0.33333' in js
+
+    ph = q.to_phar_text()
+    assert "1.23457" in ph and "-3.98765" in ph and "0.33333" in ph
+
+
+def test_read_json_roundtrip_matches_write(tmp_path):
+    q = QueryPharmacophore(name="disk")
+    q.add_point(PharmacophorePoint(type=PointType.HDON, center=(1.5, 2.5, 3.5)))
+    path = tmp_path / "q.json"
+    q.write_json(path)
+    loaded = QueryPharmacophore.read_json(path)
+    assert isinstance(loaded, QueryPharmacophore)
+    assert loaded.get_name() == "disk"
+    assert len(loaded) == 1
+    assert loaded[0].type == PointType.HDON
+    assert loaded[0].center == (1.5, 2.5, 3.5)
+
+
 def test_query_json_roundtrip_preserves_subclass_and_name():
     q = QueryPharmacophore(name="q1")
     q.add_point(PharmacophorePoint(type=PointType.HDON, center=(1, 2, 3)))

@@ -39,6 +39,7 @@ examples/paracetamol_hits.sdf
 examples/top_hits_phenol_excl.sdf
 examples/top_hits_phenol_excl.pdb
 examples/phenol_with_excl.pdb
+examples/pharmacophore.*
 
 # Type checkers / linters
 .mypy_cache/

@@ -242,26 +242,30 @@ The tables below list everything available on a `Pharmacophore` (and its `QueryP
 
 **JSON I/O**
 
+Import helpers are **classmethods**: they **return a new** ``Pharmacophore`` (usually ``QueryPharmacophore`` or ``MoleculePharmacophore`` from the JSON ``kind``). They do **not** modify an object you already constructed — always assign the result, e.g. ``q = Pharmacophore.read_json(path)``.
 
-| Method                                 | Direction | Returns / accepts                         |
-| -------------------------------------- | --------- | ----------------------------------------- |
-| `to_json_dict()`                       | export    | `dict[str, Any]`                          |
-| `to_json(**kwargs)`                    | export    | `str` (kwargs forwarded to `json.dumps`)  |
-| `write_json(path, **kwargs)`           | export    | writes UTF-8 file                         |
-| `from_json_dict(d)` *(classmethod)*    | import    | round-trips the right subclass via `kind` |
-| `from_json(s)` *(classmethod)*         | import    | parses a JSON string                      |
-| `from_json_file(path)` *(classmethod)* | import    | reads a JSON file                         |
+
+| Method                                 | Direction | Returns / accepts                                                                                     |
+| -------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------- |
+| `to_json_dict()`                       | export    | `dict[str, Any]`                                                                                    |
+| `to_json(**kwargs)`                    | export    | `str` (kwargs forwarded to `json.dumps`; default `indent=2`; pass `indent=None` for one line)          |
+| `write_json(path, **kwargs)`         | export    | writes UTF-8 file (same JSON defaults as `to_json`)                                                   |
+| `from_json_dict(d)` *(classmethod)*    | import    | **returns new** pharmacophore; subclass from JSON ``kind``                                          |
+| `from_json(s)` *(classmethod)*         | import    | **returns new** pharmacophore from a JSON string                                                   |
+| `read_json(path)` *(classmethod)*      | import    | **returns new** pharmacophore from a UTF-8 JSON file                                                  |
 
 
 **Pharao `.phar` text I/O**
 
+``from_phar_text`` / ``read_phar`` are **classmethods** that **return a new** pharmacophore (same assignment rule as JSON).
 
-| Method                                 | Direction                             |
-| -------------------------------------- | ------------------------------------- |
-| `to_phar_text()`                       | export `str` in Pharao `.phar` format |
-| `write_phar(path)`                     | write `.phar` to disk                 |
-| `from_phar_text(text)` *(classmethod)* | parse a `.phar` string                |
-| `read_phar(path)` *(classmethod)*      | read a `.phar` file                   |
+
+| Method                                 | Direction | Returns / accepts                                                                 |
+| -------------------------------------- | --------- | --------------------------------------------------------------------------------- |
+| `to_phar_text()`                       | export    | `str` (Pharao `.phar` format: name line, point lines, ``$$$$``)                   |
+| `write_phar(path)`                     | export    | writes UTF-8 file (same layout as `to_phar_text`)                                 |
+| `from_phar_text(text)` *(classmethod)* | import    | **returns new** pharmacophore from a `.phar` string                               |
+| `read_phar(path)` *(classmethod)*      | import    | **returns new** pharmacophore from a UTF-8 `.phar` file                           |
 
 
 **SDF / PDB I/O (requires RDKit, export only)**
@@ -275,7 +279,7 @@ The tables below list everything available on a `Pharmacophore` (and its `QueryP
 
 Both methods reuse `pharmacophore_to_mol` so the format matches what the multi-record `[write_hits_sdf` / `write_hits_pdb](#writing-hits-to-an-sdf-or-pdb-file)` writers produce. SDF/PDB are export-only; round-trip back to a `Pharmacophore` is not supported (use JSON or `.phar` for that).
 
-`**QueryPharmacophore` extras**
+**`QueryPharmacophore` extras**
 
 
 | Member                           | Kind                   |
@@ -311,8 +315,10 @@ q.add_point(PharmacophorePoint(type=PointType.EXCL, center=(0, 0, 2.5)))
 
 #### From JSON / Pharao `.phar`
 
+These calls **return** a loaded pharmacophore; assign to a variable (calling them on an empty ``QueryPharmacophore()`` and ignoring the return value leaves that instance unchanged):
+
 ```python
-q = Pharmacophore.from_json_file("query.json")
+q = Pharmacophore.read_json("query.json")
 q = Pharmacophore.read_phar("query.phar")
 ```
 
