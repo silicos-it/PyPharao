@@ -50,7 +50,7 @@ def test_enable_disable_and_iteration():
     assert opts.is_enabled(PointType.LIPO) is False
     opts.enable("LIPO")
     assert opts.is_enabled("LIPO") is True
-    opts.set_enabled(PointType.HACC, False)
+    opts.disable(PointType.HACC)
     enabled = opts.types_enabled()
     assert PointType.HACC not in enabled
     assert PointType.LIPO in enabled

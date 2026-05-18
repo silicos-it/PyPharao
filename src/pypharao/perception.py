@@ -29,7 +29,7 @@ class PharmacophorePerception:
     def __init__(self, **flags: bool) -> None:
         self._flags: dict[PointType, bool] = {t: True for t in self.allowed_types}
         for key, value in flags.items():
-            self.set_enabled(key, bool(value))
+            self._set_enabled(key, bool(value))
 
     @classmethod
     def _resolve(cls, t: PointType | str) -> PointType:
@@ -54,27 +54,18 @@ class PharmacophorePerception:
         self._check_allowed(tt)
         return self._flags[tt]
 
-    def set_enabled(self, t: PointType | str, enabled: bool) -> None:
-        """Turn perception of feature type ``t`` on or off."""
+    def _set_enabled(self, t: PointType | str, enabled: bool) -> None:
         tt = self._resolve(t)
         self._check_allowed(tt)
         self._flags[tt] = bool(enabled)
 
     def enable(self, t: PointType | str) -> None:
         """Enable perception for feature type ``t``."""
-        self.set_enabled(t, True)
+        self._set_enabled(t, True)
 
     def disable(self, t: PointType | str) -> None:
         """Disable perception for feature type ``t``."""
-        self.set_enabled(t, False)
-
-    def add(self, t: PointType | str) -> None:
-        """Alias for :meth:`enable`."""
-        self.enable(t)
-
-    def remove(self, t: PointType | str) -> None:
-        """Alias for :meth:`disable`."""
-        self.disable(t)
+        self._set_enabled(t, False)
 
     def types_enabled(self) -> list[PointType]:
         """All currently enabled feature types, in :class:`PointType` order."""
