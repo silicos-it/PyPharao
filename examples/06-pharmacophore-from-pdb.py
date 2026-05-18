@@ -9,9 +9,6 @@ from tqdm import tqdm
 
 from pypharao import *
 
-SMI_FILE = Path(__file__).resolve().parent / "datasets" / "compounds_10k.smi"
-MAX_COMPOUNDS = None  # None = use the whole file
-#MAX_COMPOUNDS = 500
 
 # ------------------------------------------------------------
 # Build two query pharmacophores from a 3D structure of phenol
