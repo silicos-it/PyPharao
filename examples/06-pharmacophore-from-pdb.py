@@ -1,109 +1,84 @@
 #!/usr/bin/env python3
-"""Build a query pharmacophore from a molecule and screen a library."""
 
+"""Build a query pharmacophore from PDB: binding-site features + exclusion atoms."""
+
+from collections import Counter
 from pathlib import Path
-
-from rdkit import Chem
-from rdkit.Chem import AllChem
-from tqdm import tqdm
 
 from pypharao import *
 
+DATASETS = Path(__file__).resolve().parent / "datasets"
+PROTEIN_PDB = DATASETS / "4HFZ_pharmacophore.pdb"
+EXCL_PDB = DATASETS / "4HFZ_exclusion.pdb"
+PHARMACOPHORE1_AS_PDB = Path(__file__).resolve().parent / "ph1_from_4HFZ.pdb"
+PHARMACOPHORE2_AS_PDB = Path(__file__).resolve().parent / "ph2_from_4HFZ.pdb"
 
 # ------------------------------------------------------------
-# Build two query pharmacophores from a 3D structure of phenol
+# Query from protein pharmacophore PDB + exclusion-sphere PDB
 # ------------------------------------------------------------
 
-ref_mol = Chem.AddHs(Chem.MolFromSmiles("c1ccccc1O"))
-AllChem.EmbedMolecule(ref_mol, randomSeed=0xF00D)
-AllChem.UFFOptimizeMolecule(ref_mol)
-
-perception = QueryPharmacophorePerception()
-print("Auto-perceivable feature types for a query pharmacophore:")
-perception.print_features()
-
-# Pharmacophore 1
-pharmacophore_1 = query_pharmacophore_from_molecule(ref_mol, perception, name="phenol")
-print(f"\nQuery {pharmacophore_1.get_name()!r} ({len(pharmacophore_1)} features):")
-for p in pharmacophore_1: print(f"  {p.type.value:<10} center={p.center}")
-
-# Pharmacophore 2: same as pharmacophore_1 but with AROM relaxed to AROM_OR_LIPO.
-pharmacophore_2 = pharmacophore_1.copy()
-for i, p in enumerate(pharmacophore_2):
-    if p.type == PointType.AROM:
-        pharmacophore_2.update_point(i, type=PointType.AROM_OR_LIPO)
-        break
-pharmacophore_2.set_name("phenol-arom-or-lipo")
-print(f"\nQuery {pharmacophore_2.get_name()!r} ({len(pharmacophore_2)} features):")
-for p in pharmacophore_2: print(f"  {p.type.value:<10} center={p.center}")
-
-# Self-screen sanity check
-searcher_1 = PharmacophoreSearch(pharmacophore_1)
-print("\nSelf-screen pharmacophore 1:")
-print_match_results(searcher_1.screen(ref_mol, progress=False))
-
-searcher_2 = PharmacophoreSearch(pharmacophore_2)
-print("\nSelf-screen pharmacophore 2:")
-print_match_results(searcher_2.screen(ref_mol, progress=False))
-
-
-# ------------------------------------------------------------
-# Build 3D conformers for a SMILES dataset
-# ------------------------------------------------------------
-
-smiles_lines = [
-    ln.strip()
-    for ln in SMI_FILE.read_text(encoding="utf-8").splitlines()
-    if ln.strip()
-]
-if MAX_COMPOUNDS is not None:
-    smiles_lines = smiles_lines[:MAX_COMPOUNDS]
-
-print(f"\nBuilding 3D structures for {len(smiles_lines)} SMILES from {SMI_FILE.name}")
-prepared: list[tuple[int, str, Chem.Mol]] = []
-parse_fail = embed_fail = 0
-with tqdm(smiles_lines, desc="3D structures", unit="mol") as pbar:
-    for line_idx, smi in enumerate(pbar):
-        mol_3d = Chem.MolFromSmiles(smi)
-        if mol_3d is None:
-            parse_fail += 1
-            continue
-        mol_3d = Chem.AddHs(mol_3d)
-        if AllChem.EmbedMolecule(mol_3d, randomSeed=0xF00D + line_idx) != 0:
-            embed_fail += 1
-            continue
-        AllChem.UFFOptimizeMolecule(mol_3d)
-        prepared.append((line_idx, smi, mol_3d))
-        pbar.set_postfix(ready=len(prepared), parse=parse_fail, embed=embed_fail)
-
-print(
-    f"Done: {len(prepared)} ligands ready, "
-    f"{parse_fail} invalid SMILES, {embed_fail} embed failures"
+# Generate pharmacophore
+query = query_pharmacophore_from_protein(
+    PROTEIN_PDB,
+    EXCL_PDB,
+    min_distance_between_excl_points=1.5,
+    name="4HFZ-binding-site",
 )
 
+# Show pharmacophore
+by_type = Counter(p.type.value for p in query)
+print(f"\nQuery {query.get_name()!r} ({len(query)} features)")
+print("  counts:", dict(sorted(by_type.items())))
+print("\nFirst points (truncated):")
+for i, p in enumerate(query):
+    if i >= 8:
+        print(f"  … ({len(query) - 12} more)")
+        break
+    label = p.type.value
+    x, y, z = p.center
+    coord = f"({x:.3f}, {y:.3f}, {z:.3f})"
+    extra = f" σ={p.sigma:.2f}" if p.type == PointType.EXCL else ""
+    print(f"  {label:<14} center={coord}{extra}")
 
-# ------------------------------------------------------------
-# Run the screen and report the top hits
-# ------------------------------------------------------------
+# Write pharmacophore to pdb file
+query.write_pdb(PHARMACOPHORE1_AS_PDB)
 
-# Pharmacophore 1
-print("Pharmacophore 1")
-hits = searcher_1.screen(prepared, progress=True)
-sorted_hits = sort_match_results(hits, sort="descending", key="tanimoto")
-print_match_results(sorted_hits, limit=10)
-SDF_FILE = Path(__file__).resolve().parent / "top_hits_ph_1.sdf"
-write_hits_sdf(sorted_hits[:10], SDF_FILE, pharmacophore=pharmacophore_1)
-PDB_FILE = Path(__file__).resolve().parent / "top_hits_ph_1.pdb"
-write_hits_pdb(sorted_hits[:10], PDB_FILE, pharmacophore=pharmacophore_1)
-print()
+# ---------------------------
+# Now we need some polishing
+# ---------------------------
 
-# Pharmacophore 2
-print("Pharmacophore 2")
-hits = searcher_2.screen(prepared, progress=True)
-sorted_hits = sort_match_results(hits, sort="descending", key="tanimoto")
-print_match_results(sorted_hits, limit=10)
-SDF_FILE = Path(__file__).resolve().parent / "top_hits_ph_2.sdf"
-write_hits_sdf(sorted_hits[:10], SDF_FILE, pharmacophore=pharmacophore_2)
-PDB_FILE = Path(__file__).resolve().parent / "top_hits_ph_2.pdb"
-write_hits_pdb(sorted_hits[:10], PDB_FILE, pharmacophore=pharmacophore_2)
+# First merge all three LIPO points in a central one (new coordinate = -6.989, -32.071, 31.677)
+# We will modify the first LIPO (i = 4), and remove i = 5 and 6
 
+x = y = z = 0.0
+for i, p in enumerate(query):
+    if i in [4,5,6]:
+        x += p.center[0]
+        y += p.center[1]
+        z += p.center[2]
+x /= 3
+y /= 3
+z /= 3
+query.update_point(4, center=(x,y,z))
+query.remove_point(6)
+query.remove_point(5)
+
+# We can also remove AROM 2
+query.remove_point(1)
+
+# Now remove all EXCL points that are located than 8 A from any pharmacophore point
+n_removed = query.purge_exclusion_spheres(distance=8)
+print("Purged pharmacophore. Removed %d EXCL points" % (n_removed))
+
+# Write as pdb and print final set
+query.write_pdb(PHARMACOPHORE2_AS_PDB)
+
+for i, p in enumerate(query):
+    if i >= 8:
+        print(f"  … ({len(query) - 12} more)")
+        break
+    label = p.type.value
+    x, y, z = p.center
+    coord = f"({x:.3f}, {y:.3f}, {z:.3f})"
+    extra = f" σ={p.sigma:.2f}" if p.type == PointType.EXCL else ""
+    print(f"  {label:<14} center={coord}{extra}")

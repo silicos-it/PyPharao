@@ -222,14 +222,66 @@ The tables below list everything available on a `Pharmacophore` (and its `QueryP
 
 **Editing points**
 
+All edits run through **`_check_type`**: the new or updated point must belong to this pharmacophore subclass’s **`allowed_types`** (`QueryPharmacophore` allows every `PointType`, including `EXCL`; `MoleculePharmacophore` omits query-only types such as `EXCL`).
+
 
 | Method         | Signature          | Notes                                                                                                          |
 | -------------- | ------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `add_point`    | `(point)`          | Append after validating type.                                                                                  |
 | `set_point`    | `(idx, point)`     | Replace at `idx` after validating type.                                                                        |
 | `update_point` | `(idx, **changes)` | Shorthand for `set_point(idx, self[idx].replace(**changes))`. Accepts `type=`, `center=`, `sigma=`, `normal=`. |
-| `remove_point` | `(idx)`            | Delete the point at `idx`.                                                                                     |
+| `remove_point` | `(idx)`            | Delete the point at `idx`. Later indices shift down by one (like `del` on a `list`).                          |
 | `clear`        | `()`               | Remove every point.                                                                                            |
+
+Examples (below, **`q`** is a **`QueryPharmacophore`**, either empty or already filled):
+
+```python
+from pypharao import PharmacophorePoint, PointType, QueryPharmacophore
+
+q = QueryPharmacophore(name="demo")
+
+# add_point — full PharmacophorePoint (AROM needs a plane normal as absolute tip coords)
+q.add_point(
+    PharmacophorePoint(
+        type=PointType.AROM,
+        center=(10.0, 0.0, 0.0),
+        normal=(11.0, 0.0, 0.0),
+        sigma=0.7,
+    )
+)
+q.add_point(
+    PharmacophorePoint(
+        type=PointType.EXCL,
+        center=(5.0, 5.0, 5.0),
+        sigma=1.6,
+    )
+)
+```
+
+```python
+# update_point — tweak fields without building a replacement by hand
+q.update_point(0, sigma=1.0)
+q.update_point(0, center=(10.1, 0.05, -0.02))
+
+for i, p in enumerate(q):
+    if p.type == PointType.AROM:
+        q.update_point(i, type=PointType.AROM_OR_LIPO)  # normal kept by replace()
+        break
+```
+
+```python
+# set_point — replace slot i with another immutable point wholesale
+old = q[1]
+replacement = PharmacophorePoint(type=PointType.HACC, center=old.center, sigma=1.05)
+q.set_point(1, replacement)
+```
+
+```python
+q.remove_point(0)  # indices after this slot shift down
+q.clear()
+```
+
+For **`MoleculePharmacophore`**, the same methods apply, but a **`PointType`** not allowed for that subclass (for example **`EXCL`**) raises **`ValueError`**.
 
 
 **Copying**
@@ -282,11 +334,21 @@ Both methods reuse `pharmacophore_to_mol` so the format matches what the multi-r
 **`QueryPharmacophore` extras**
 
 
-| Member                           | Kind                   |
-| -------------------------------- | ---------------------- |
-| `__init__(points=None, name="")` | overridden constructor |
-| `get_name()` / `set_name(name)`  | explicit accessors     |
-| `name`                           | property + setter      |
+| Member                           | Kind                   | Returns |
+| -------------------------------- | ---------------------- | ------- |
+| `__init__(points=None, name="")` | overridden constructor | `None` |
+| `get_name()`                     | accessor               | `str` |
+| `set_name(name)`                 | mutator                | `None` |
+| `name`                           | property               | read → `str`; write → `None` |
+| `purge_exclusion_spheres(distance=8)` | mutates ``self``       | `int` — number of ``EXCL`` points removed |
+
+**purge_exclusion_spheres** removes each ``EXCL`` whose centre is farther than ``distance`` ångström from **every** non-``EXCL`` point (Euclidean centre–centre distance). ``EXCL`` sites within ``distance`` of *at least one* anchor feature are kept. If there are no non-``EXCL`` points, every ``EXCL`` is removed. ``distance`` must be ``>= 0``.
+
+After loading a bulky exclusion map (e.g. from protein), discard spheres that sit far from the pharmacophore core. The **same** ``query`` object is updated; the return value is only how many ``EXCL`` points were stripped (not a new pharmacophore):
+
+```python
+n_removed = query.purge_exclusion_spheres(distance=8.0)
+```
 
 
 `MoleculePharmacophore` adds no methods; it narrows `allowed_types` to `{AROM, LIPO, HDON, HACC, HACC_AND_HDON, POSC, NEGC}`.
@@ -294,10 +356,10 @@ Both methods reuse `pharmacophore_to_mol` so the format matches what the multi-r
 **Module-level helpers**
 
 
-| Function               | Purpose                                                                                                   |
-| ---------------------- | --------------------------------------------------------------------------------------------------------- |
-| `distance(p, q)`       | Euclidean distance between two `PharmacophorePoint` centres.                                              |
-| `cosine_normals(p, q)` | Cosine between the (relative) normal vectors of `p` and `q`; returns `0.0` if either point has no normal. |
+| Function               | Purpose                                                                                                   | Returns |
+| ---------------------- | --------------------------------------------------------------------------------------------------------- | ------- |
+| `distance(p, q)`       | Euclidean distance between two `PharmacophorePoint` centres.                                              | `float` |
+| `cosine_normals(p, q)` | Cosine between the (relative) normal vectors of `p` and `q`; uses `0.0` if either point has no normal. | `float` |
 
 
 ### Generating query pharmacophores
@@ -341,8 +403,13 @@ q = query_pharmacophore_from_molecule(mol, name="phenol")
 `query_pharmacophore_from_molecule` returns a `QueryPharmacophore`. Compound query types (`AROM_OR_LIPO`, `HACC_OR_HDON`) are **not** auto-perceived — refine them by hand if desired. `HACC_AND_HDON` is created automatically whenever an `HDON` and an `HACC` sit at the same atom (the two originals are removed).
 
 ```python
-query_pharmacophore_from_protein(...)  # raises NotImplementedError (placeholder)
+q = query_pharmacophore_from_protein(
+    "binding_site.pdb",
+    "excluded_atoms.pdb",
+    min_distance_between_excl_points=1.5,
+)
 ```
+Uses the same perception as `query_pharmacophore_from_molecule` on the protein PDB, then places `EXCL` points at each atom of the exclusion PDB and thins them so pairwise distances are at least `min_distance_between_excl_points` Å.
 
 #### Adding excluded volumes around a molecule (requires RDKit)
 

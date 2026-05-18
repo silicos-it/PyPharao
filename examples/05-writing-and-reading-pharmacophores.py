@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Build a pharmacophore from a molecule and write/read JSON and Pharao ``.phar``."""
 
 from pathlib import Path
 

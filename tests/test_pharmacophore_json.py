@@ -121,3 +121,42 @@ def test_update_point_enforces_subclass_allowed_types():
     with pytest.raises(ValueError, match="EXCL"):
         m.update_point(0, type=PointType.EXCL)
     assert m[0].type == PointType.HACC
+
+
+def test_purge_exclusion_spheres_keeps_near_removes_far():
+    q = QueryPharmacophore(name="purge")
+    q.add_point(PharmacophorePoint(type=PointType.HACC, center=(0.0, 0.0, 0.0)))
+    q.add_point(PharmacophorePoint(type=PointType.EXCL, center=(5.0, 0.0, 0.0)))
+    q.add_point(PharmacophorePoint(type=PointType.EXCL, center=(20.0, 0.0, 0.0)))
+
+    n = q.purge_exclusion_spheres(distance=8.0)
+    assert n == 1
+    assert len(q) == 2
+    assert q[0].type == PointType.HACC
+    assert q[1].type == PointType.EXCL
+    assert q[1].center == (5.0, 0.0, 0.0)
+
+
+def test_purge_exclusion_spheres_boundary_keeps_when_within():
+    q = QueryPharmacophore()
+    q.add_point(PharmacophorePoint(type=PointType.HACC, center=(0.0, 0.0, 0.0)))
+    q.add_point(PharmacophorePoint(type=PointType.EXCL, center=(8.0, 0.0, 0.0)))
+
+    assert q.purge_exclusion_spheres(distance=8.0) == 0
+    assert len(q) == 2
+
+
+def test_purge_exclusion_spheres_only_excl_removes_all():
+    q = QueryPharmacophore()
+    q.add_point(PharmacophorePoint(type=PointType.EXCL, center=(0.0, 0.0, 0.0)))
+    q.add_point(PharmacophorePoint(type=PointType.EXCL, center=(1.0, 0.0, 0.0)))
+
+    assert q.purge_exclusion_spheres(distance=100.0) == 2
+    assert len(q) == 0
+
+
+def test_purge_exclusion_spheres_rejects_negative_distance():
+    q = QueryPharmacophore()
+    q.add_point(PharmacophorePoint(type=PointType.HACC, center=(0.0, 0.0, 0.0)))
+    with pytest.raises(ValueError, match="distance"):
+        q.purge_exclusion_spheres(distance=-1.0)

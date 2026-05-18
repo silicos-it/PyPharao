@@ -123,9 +123,52 @@ def test_molecule_perception_subclass_perception_allowed_in_screen():
     assert PointType.HACC_AND_HDON not in types
 
 
-def test_query_from_protein_is_stub():
-    with pytest.raises(NotImplementedError):
-        query_pharmacophore_from_protein()
+def test_query_pharmacophore_from_protein_loads_features_and_thins_excl(tmp_path):
+    phenol = _embed("c1ccccc1O")
+    protein_pdb = tmp_path / "prot.pdb"
+    Chem.MolToPDBFile(phenol, str(protein_pdb))
+
+    # Two carbons 8 Å apart — both survive thinning at 2 Å; only one survives at 10 Å.
+    excl_pdb = tmp_path / "excl.pdb"
+    excl_pdb.write_text(
+        "ATOM      1  C   UNL A   1       0.000   0.000   0.000  1.00  0.00           C\n"
+        "ATOM      2  C   UNL A   1       8.000   0.000   0.000  1.00  0.00           C\n"
+        "END\n"
+    )
+
+    base_only = query_pharmacophore_from_molecule(phenol, name="prot")
+    q = query_pharmacophore_from_protein(
+        protein_pdb,
+        excl_pdb,
+        min_distance_between_excl_points=2.0,
+        name="prot",
+    )
+    assert isinstance(q, QueryPharmacophore)
+    assert len(q) == len(base_only) + 2
+    assert sum(1 for p in q if p.type == PointType.EXCL) == 2
+
+    q_dense = query_pharmacophore_from_protein(
+        protein_pdb,
+        excl_pdb,
+        min_distance_between_excl_points=10.0,
+        name="prot",
+    )
+    assert sum(1 for p in q_dense if p.type == PointType.EXCL) == 1
+
+
+def test_query_pharmacophore_from_protein_rejects_negative_spacing(tmp_path):
+    protein_pdb = tmp_path / "p.pdb"
+    protein_pdb.write_text(
+        Chem.MolToPDBBlock(_embed("C"))
+    )
+    excl_pdb = tmp_path / "e.pdb"
+    excl_pdb.write_text(Chem.MolToPDBBlock(_embed("C")))
+    with pytest.raises(ValueError, match="min_distance_between_excl_points"):
+        query_pharmacophore_from_protein(
+            protein_pdb,
+            excl_pdb,
+            min_distance_between_excl_points=-1.0,
+        )
 
 
 def _heavy_atom_centers(mol: Chem.Mol):

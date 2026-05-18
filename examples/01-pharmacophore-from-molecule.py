@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Build a query pharmacophore from a molecule and screen a library."""
 
 from pathlib import Path
 

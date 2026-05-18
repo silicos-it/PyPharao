@@ -534,6 +534,49 @@ class QueryPharmacophore(Pharmacophore):
     def name(self, value: str) -> None:
         self._name = str(value)
 
+    def purge_exclusion_spheres(self, distance: float = 8.0) -> int:
+        """Drop ``EXCL`` points whose centre is farther than ``distance`` Å from
+        **every** non-``EXCL`` point (Euclidean centre–centre distance).
+
+        Non-``EXCL`` points are left unchanged. ``EXCL`` sites within ``distance``
+        of *at least one* anchor point are kept.
+
+        If there are no non-``EXCL`` points, all ``EXCL`` points are removed.
+
+        Parameters
+        ----------
+        distance :
+            Maximum allowed gap (ångström) from the nearest non-``EXCL`` feature;
+            default ``8``.
+
+        Returns
+        -------
+        int
+            Number of ``EXCL`` points removed.
+        """
+        if distance < 0:
+            raise ValueError("distance must be >= 0")
+        thr = float(distance)
+        anchors = [p for p in self._points if p.type != PointType.EXCL]
+        kept: list[PharmacophorePoint] = []
+        removed = 0
+        for p in self._points:
+            if p.type != PointType.EXCL:
+                kept.append(p)
+                continue
+            if not anchors:
+                removed += 1
+                continue
+            mind = min(
+                math.dist((p.x, p.y, p.z), (a.x, a.y, a.z)) for a in anchors
+            )
+            if mind <= thr:
+                kept.append(p)
+            else:
+                removed += 1
+        self._points = kept
+        return removed
+
 
 class MoleculePharmacophore(Pharmacophore):
     """Pharmacophore perceived from a database molecule.

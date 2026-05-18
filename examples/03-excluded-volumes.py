@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Add EXCL spheres around a ligand and screen with the resulting query."""
 
 from pathlib import Path
 

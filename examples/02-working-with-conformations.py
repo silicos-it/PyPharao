@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Screen a small library across multiple conformers and write the hits to SDF."""
 
 from pathlib import Path
 

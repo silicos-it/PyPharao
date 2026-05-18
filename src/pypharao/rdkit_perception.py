@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -499,6 +500,45 @@ def _require_conformer(mol: Any) -> None:
         )
 
 
+def _mol_from_pdb_file(path: str | Path) -> Chem.Mol:
+    """Load a single-structure PDB as an :class:`rdkit.Chem.Mol` with 3D coordinates."""
+    p = Path(path).expanduser().resolve()
+    if not p.is_file():
+        raise FileNotFoundError(f"PDB file not found: {p}")
+    mol = Chem.MolFromPDBFile(str(p), sanitize=False, removeHs=False)
+    if mol is None:
+        raise ValueError(f"RDKit could not parse PDB file: {p}")
+    _require_conformer(mol)
+    try:
+        Chem.SanitizeMol(mol)
+    except Chem.MolSanitizeException as e:
+        raise ValueError(
+            f"RDKit could not sanitize structure read from PDB: {p}"
+        ) from e
+    return mol
+
+
+def _all_atom_centers_array(mol: Chem.Mol, conf_id: int) -> np.ndarray:
+    """Coordinates of every atom (including hydrogen) in one conformer."""
+    if conf_id < 0 or conf_id >= mol.GetNumConformers():
+        raise ValueError(
+            f"conf_id {conf_id} is out of range for a molecule with "
+            f"{mol.GetNumConformers()} conformer(s)"
+        )
+    conf = mol.GetConformer(conf_id)
+    return np.asarray(
+        [
+            (
+                conf.GetAtomPosition(a.GetIdx()).x,
+                conf.GetAtomPosition(a.GetIdx()).y,
+                conf.GetAtomPosition(a.GetIdx()).z,
+            )
+            for a in mol.GetAtoms()
+        ],
+        dtype=float,
+    )
+
+
 def _normalize_mols_arg(mol: Chem.Mol | Sequence[Chem.Mol]) -> list[Chem.Mol]:
     if isinstance(mol, Chem.Mol):
         return [mol]
@@ -669,14 +709,85 @@ def query_pharmacophore_from_molecule(
     return ph
 
 
-def query_pharmacophore_from_protein(*args: Any, **kwargs: Any) -> QueryPharmacophore:
-    """Derive a :class:`QueryPharmacophore` from a protein structure.
+def query_pharmacophore_from_protein(
+    protein_pdb_filename: str | Path,
+    excl_atoms_pdb_filename: str | Path,
+    perception: QueryPharmacophorePerception | None = None,
+    *,
+    min_distance_between_excl_points: float = 1.5,
+    conf_id: int = 0,
+    excl_conf_id: int = 0,
+    name: str = "",
+    excl_sigma: float | None = None,
+) -> QueryPharmacophore:
+    """Derive a :class:`QueryPharmacophore` from PDB-defined protein and exclusions.
 
-    Not implemented yet.
+    Pharmacophore features (``AROM``, ``HACC``, …) are perceived from the structure
+    in ``protein_pdb_filename`` using the same rules as
+    :func:`query_pharmacophore_from_molecule`. Each atom in ``excl_atoms_pdb_filename``
+    becomes an ``EXCL`` candidate at that atom's coordinates; candidates closer than
+    ``min_distance_between_excl_points`` ångström to an already kept ``EXCL`` are
+    dropped (greedy thinning in PDB atom order).
+
+    Parameters
+    ----------
+    protein_pdb_filename, excl_atoms_pdb_filename : path-like
+        Paths to PDB files. Both must contain at least one conformer with 3D coordinates.
+    perception : QueryPharmacophorePerception, optional
+        Same role as for :func:`query_pharmacophore_from_molecule`.
+    min_distance_between_excl_points : float, optional
+        Minimum centre-to-centre distance between emitted ``EXCL`` points after thinning.
+        Must be ``>= 0``; ``0`` disables thinning (every atom yields one ``EXCL``).
+    conf_id : int, optional
+        Conformer index used when perceiving the protein.
+    excl_conf_id : int, optional
+        Conformer index used when reading exclusion atom coordinates.
+    name : str, optional
+        Query name; defaults to the protein PDB stem when empty.
+    excl_sigma : float, optional
+        Gaussian width for ``EXCL`` points; defaults to :data:`DEFAULT_SIGMA` ``EXCL``.
     """
-    raise NotImplementedError(
-        "query_pharmacophore_from_protein is not implemented yet."
+    if min_distance_between_excl_points < 0:
+        raise ValueError("min_distance_between_excl_points must be >= 0")
+
+    protein_mol = _mol_from_pdb_file(protein_pdb_filename)
+    nm = name or Path(protein_pdb_filename).stem
+    q = query_pharmacophore_from_molecule(
+        protein_mol,
+        perception,
+        conf_id=conf_id,
+        name=nm,
     )
+
+    excl_mol = _mol_from_pdb_file(excl_atoms_pdb_filename)
+    coords = _all_atom_centers_array(excl_mol, excl_conf_id)
+    if coords.shape[0] == 0:
+        return q
+
+    sigma_excl = float(
+        DEFAULT_SIGMA[PointType.EXCL] if excl_sigma is None else excl_sigma
+    )
+
+    if min_distance_between_excl_points > 0:
+        priorities = np.zeros(coords.shape[0], dtype=float)
+        survivors = _thin_points_min_spacing(
+            coords,
+            priorities,
+            float(min_distance_between_excl_points),
+            max_points=None,
+        )
+    else:
+        survivors = coords
+
+    for x, y, z in survivors:
+        q.add_point(
+            PharmacophorePoint(
+                type=PointType.EXCL,
+                center=(float(x), float(y), float(z)),
+                sigma=sigma_excl,
+            )
+        )
+    return q
 
 
 def molecule_pharmacophore_from_molecule(

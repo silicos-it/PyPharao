@@ -47,8 +47,8 @@ except ImportError:
     query_pharmacophore_from_molecule = None  # type: ignore[misc, assignment]
 
     def query_pharmacophore_from_protein(*args, **kwargs):  # type: ignore[no-redef]
-        raise NotImplementedError(
-            "query_pharmacophore_from_protein is not implemented yet."
+        raise ImportError(
+            "query_pharmacophore_from_protein requires RDKit (pip install rdkit)."
         )
 
 
