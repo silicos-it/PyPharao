@@ -1,8 +1,7 @@
 numpy>=1.22
+rdkit>=2022.9.1
+tqdm>=4.66
 
 [dev]
 pytest>=7.0
 ruff>=0.1.0
-
-[rdkit]
-rdkit>=2022.9.1

@@ -1,0 +1,4 @@
+include LICENSE README.md pyproject.toml
+graft src/pypharao
+prune tests
+prune examples

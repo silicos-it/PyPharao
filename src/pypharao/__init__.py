@@ -1,5 +1,12 @@
 """PyPharao: pharmacophore model and Pharao-style 3D Gaussian matching."""
 
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("pypharao")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"
+
 from .alignment import Alignment, position_molecule_coords, position_pharmacophore
 from .match_report import (
     pharmacophore_to_mol,
@@ -53,6 +60,7 @@ except ImportError:
 
 
 __all__ = [
+    "__version__",
     "Alignment",
     "DEFAULT_SIGMA",
     "MatchResult",

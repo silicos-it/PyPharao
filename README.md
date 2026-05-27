@@ -146,53 +146,113 @@ Directional rules (the query point decides compatibility; molecule `EXCL` does n
 
 ## 2. Installing PyPharao
 
-PyPharao needs **NumPy** and (for perception, molecule I/O, and screening) **RDKit**, plus **tqdm** for progress bars during `screen()`.
+The installable library is **`src/pypharao/`** only. The `examples/` and `tests/` directories stay in the repository and are **not** shipped in the package.
 
-### pip (development / from a checkout)
+Runtime dependencies (installed automatically with PyPharao):
 
-From a clone of this repository:
+| Component | Required for |
+| --------- | ------------ |
+| **NumPy** | Core library |
+| **RDKit** | Perception, molecule I/O, screening |
+| **tqdm** | Progress bars when `screen(..., progress=True)` |
 
-```bash
-pip install -e ".[dev,rdkit,examples]"
-```
+**Version and dependency source of truth:** edit `pyproject.toml` only. The conda recipe reads the version from there automatically; bump `version = "…"` once when releasing.
 
-(`examples` pulls in `tqdm`. To add it later: `pip install tqdm`.)
+### pip
 
-If `pip install rdkit` is unavailable on your platform, install RDKit from `conda-forge` first, then install PyPharao without the `rdkit` extra:
-
-```bash
-conda install -c conda-forge rdkit numpy
-pip install -e .
-```
-
-**Has this been “checked”?** The project declares dependencies in `**pyproject.toml`** and `**environment.yml**`; CI and local development use the commands above. Whether `**pip install pypharao**` works from PyPI depends on publication and index state — prefer `**pip install -e .**` from a checkout if you need a known-good path.
-
-### conda
+**From PyPI** (after publication):
 
 ```bash
-conda env create -f environment.yml
-conda activate pypharao
+pip install pypharao
 ```
 
-This installs NumPy, RDKit, and an editable pip install with `**[dev]**`.
-
-A local conda recipe is provided in `**conda-recipe/**`:
-
-```bash
-conda build conda-recipe
-```
-
-### Cloning the GitHub repository
-
-Yes. After cloning:
+**From a git checkout** (installs `src/pypharao` into your environment):
 
 ```bash
 git clone https://github.com/silicos-it/PyPharao.git
 cd PyPharao
-pip install -e ".[rdkit,examples,dev]"
+pip install .
 ```
 
-(or a subset of extras if you do not need dev tools). This is the usual way to work against `**main**` or a feature branch.
+If `pip install rdkit` is unavailable on your platform, install RDKit from conda-forge first, then install PyPharao (conda’s RDKit satisfies the requirement):
+
+```bash
+conda install -c conda-forge rdkit numpy tqdm
+pip install .
+```
+
+**Update an existing pip install:**
+
+```bash
+pip install -U pypharao          # from PyPI
+pip install -U .                 # from a checkout (after git pull)
+```
+
+### conda
+
+**Environment from a checkout** (conda-forge deps + pip install of the library):
+
+```bash
+git clone https://github.com/silicos-it/PyPharao.git
+cd PyPharao
+conda env create -f environment.yml
+conda activate pypharao
+```
+
+**Build and install a local conda package** (see `conda-recipe/`):
+
+```bash
+conda build conda-recipe
+conda install pypharao --use-local
+```
+
+**Update:**
+
+```bash
+conda activate pypharao
+git pull
+pip install -U .                         # refresh library from checkout
+# or, after rebuilding the recipe:
+conda install pypharao --use-local
+```
+
+**Contributors / editable install with tests:**
+
+```bash
+conda env create -f environment-dev.yml
+conda activate pypharao-dev
+pytest
+```
+
+### uv
+
+**From PyPI:**
+
+```bash
+uv pip install pypharao
+```
+
+**From a git checkout:**
+
+```bash
+git clone https://github.com/silicos-it/PyPharao.git
+cd PyPharao
+uv pip install .
+```
+
+**Update:**
+
+```bash
+uv pip install -U pypharao      # from PyPI
+uv pip install -U .             # from a checkout (after git pull)
+```
+
+**Development** (editable install, tests, ruff — uses `[dependency-groups]` in `pyproject.toml`):
+
+```bash
+uv sync --group dev
+uv run pytest
+```
 
 ---
 

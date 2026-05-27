@@ -1,6 +1,6 @@
-# End-user environment: library only (src/), not examples/ or tests/.
+# Developer environment: editable install with test/lint tooling.
 # Version and pip dependencies are defined in pyproject.toml.
-name: pypharao
+name: pypharao-dev
 channels:
   - conda-forge
 dependencies:
@@ -10,4 +10,4 @@ dependencies:
   - tqdm>=4.66
   - pip
   - pip:
-    - .
+    - -e ".[dev]"
