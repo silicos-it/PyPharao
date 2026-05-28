@@ -51,18 +51,18 @@ Runtime dependencies (installed automatically with PyPharao):
 
 ### pip
 
-**From PyPI**:
-
-```bash
-pip install pypharao
-```
-
 **From a git checkout** (installs `src/pypharao` into your environment):
 
 ```bash
 git clone https://github.com/silicos-it/PyPharao.git
 cd PyPharao
 pip install .
+```
+
+**Directly from GitHub** (no clone required; `git` must be available locally):
+
+```bash
+pip install git+https://github.com/silicos-it/PyPharao.git
 ```
 
 If `pip install rdkit` is unavailable on your platform, install RDKit from conda-forge first, then install PyPharao (conda’s RDKit satisfies the requirement):
@@ -75,7 +75,6 @@ pip install .
 **Update an existing pip install**
 
 ```bash
-pip install -U pypharao          # from PyPI
 pip install -U .                 # from a checkout (after git pull)
 ```
 
@@ -117,12 +116,6 @@ pytest
 
 ### uv
 
-**From PyPI:**
-
-```bash
-uv pip install pypharao
-```
-
 **From a git checkout:**
 
 ```bash
@@ -134,20 +127,12 @@ uv pip install .
 **Update:**
 
 ```bash
-uv pip install -U pypharao      # from PyPI
 uv pip install -U .             # from a checkout (after git pull)
-```
-
-**Development** (editable install, tests, ruff — uses `[dependency-groups]` in `pyproject.toml`):
-
-```bash
-uv sync --group dev
-uv run pytest
 ```
 
 ### Importing PyPharao
 
-After installation, the library can be used from wiyhin your `Python` scripts. The whole public API lives at the top of the package, so a single import is enough:
+After installation, the library can be used from within your `Python` scripts. The whole public API lives at the top of the package, so a single import is enough:
 
 ```python
 from pypharao import *
@@ -348,8 +333,7 @@ for t in perception:                         # iterate over allowed types
     ...
 ```
 
-When the `query_pharmacophore_from_molecule` function (or the internal molecule perception used by `screen()`) is called with no `perception` argument,
-the relevant default `QueryPharmacophorePerception()` or `MoleculePharmacophorePerception()` is used.
+When the `query_pharmacophore_from_molecule` function (or the internal molecule perception used by `screen()`) is called with no `perception` argument, the relevant default `QueryPharmacophorePerception()` or `MoleculePharmacophorePerception()` is used.
 
 
 ### 3.2 Creating pharmacophores
