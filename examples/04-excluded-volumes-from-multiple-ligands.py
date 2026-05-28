@@ -7,7 +7,15 @@ from rdkit.Chem import AllChem
 from rdkit.Chem import rdFMCS, rdMolAlign, rdMolTransforms
 from tqdm import tqdm
 
-from pypharao import *
+from pypharao import (
+    PharmacophoreSearch,
+    add_excluded_volume,
+    print_match_results,
+    query_pharmacophore_from_molecule,
+    sort_match_results,
+    write_hits_pdb,
+    write_hits_sdf,
+)
 
 SMI_FILE = Path(__file__).resolve().parent / "datasets" / "compounds_10k.smi"
 MAX_COMPOUNDS = 500  # or None = use the whole file
@@ -23,7 +31,8 @@ AllChem.UFFOptimizeMolecule(phenol)
 
 pharmacophore = query_pharmacophore_from_molecule(phenol, name="phenol")
 print(f"\nQuery {pharmacophore.get_name()!r} ({len(pharmacophore)} features):")
-for p in pharmacophore: print(f"  {p.type.value:<10} center={p.center}")
+for p in pharmacophore:
+    print(f"  {p.type.value:<10} center={p.center}")
 
 # -------------------------------------------------------------
 # Create 3D-conformations of both phenol and 7 other structures
@@ -53,7 +62,8 @@ mcs_pattern = Chem.MolFromSmarts(res.smartsString)
 # Generate conformations of all molecules starting from molecule 1 (not phenol)
 for mol in mols[1:]:
     cids = AllChem.EmbedMultipleConfs(mol, numConfs=NUM_CONFS)
-    for cid in cids: AllChem.MMFFOptimizeMolecule(mol, confId=cid)
+    for cid in cids:
+        AllChem.MMFFOptimizeMolecule(mol, confId=cid)
 
 # Align all molecules to the first molecule (reference)
 ref_mol = mols[0]

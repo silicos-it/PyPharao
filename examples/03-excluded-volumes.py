@@ -6,7 +6,15 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from tqdm import tqdm
 
-from pypharao import *
+from pypharao import (
+    PharmacophoreSearch,
+    add_excluded_volume,
+    print_match_results,
+    query_pharmacophore_from_molecule,
+    sort_match_results,
+    write_hits_pdb,
+    write_hits_sdf,
+)
 
 SMI_FILE = Path(__file__).resolve().parent / "datasets" / "compounds_10k.smi"
 MAX_COMPOUNDS = None  # or None = use the whole file
@@ -22,7 +30,8 @@ AllChem.UFFOptimizeMolecule(phenol)
 
 pharmacophore = query_pharmacophore_from_molecule(phenol, name="phenol")
 print(f"\nQuery {pharmacophore.get_name()!r} ({len(pharmacophore)} features):")
-for p in pharmacophore: print(f"  {p.type.value:<10} center={p.center}")
+for p in pharmacophore:
+    print(f"  {p.type.value:<10} center={p.center}")
 
 # ------------------------------------------------------------
 # Add excluded volumes around the molecule

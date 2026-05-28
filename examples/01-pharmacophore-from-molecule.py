@@ -6,7 +6,16 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from tqdm import tqdm
 
-from pypharao import *
+from pypharao import (
+    PharmacophoreSearch,
+    PointType,
+    QueryPharmacophorePerception,
+    print_match_results,
+    query_pharmacophore_from_molecule,
+    sort_match_results,
+    write_hits_pdb,
+    write_hits_sdf,
+)
 
 SMI_FILE = Path(__file__).resolve().parent / "datasets" / "compounds_10k.smi"
 MAX_COMPOUNDS = None  # None = use the whole file
@@ -27,7 +36,8 @@ perception.print_features()
 # Pharmacophore 1
 pharmacophore_1 = query_pharmacophore_from_molecule(ref_mol, perception, name="phenol")
 print(f"\nQuery {pharmacophore_1.get_name()!r} ({len(pharmacophore_1)} features):")
-for p in pharmacophore_1: print(f"  {p.type.value:<10} center={p.center}")
+for p in pharmacophore_1:
+    print(f"  {p.type.value:<10} center={p.center}")
 
 # Pharmacophore 2: same as pharmacophore_1 but with AROM relaxed to AROM_OR_LIPO.
 pharmacophore_2 = pharmacophore_1.copy()
@@ -37,7 +47,8 @@ for i, p in enumerate(pharmacophore_2):
         break
 pharmacophore_2.set_name("phenol-arom-or-lipo")
 print(f"\nQuery {pharmacophore_2.get_name()!r} ({len(pharmacophore_2)} features):")
-for p in pharmacophore_2: print(f"  {p.type.value:<10} center={p.center}")
+for p in pharmacophore_2:
+    print(f"  {p.type.value:<10} center={p.center}")
 
 # Self-screen sanity check
 searcher_1 = PharmacophoreSearch(pharmacophore_1)

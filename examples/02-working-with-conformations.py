@@ -4,9 +4,14 @@ from pathlib import Path
 
 from rdkit import Chem
 from rdkit.Chem import AllChem
-from tqdm import tqdm
 
-from pypharao import *
+from pypharao import (
+    PharmacophoreSearch,
+    print_match_results,
+    query_pharmacophore_from_molecule,
+    sort_match_results,
+    write_hits_sdf,
+)
 
 NUM_CONFS = 5
 SDF_OUT = Path(__file__).resolve().parent / "paracetamol_hits.sdf"
@@ -17,7 +22,8 @@ AllChem.EmbedMolecule(query_mol)
 AllChem.UFFOptimizeMolecule(query_mol)
 query = query_pharmacophore_from_molecule(query_mol, name="paracetamol")
 print(f"\nQuery {query.get_name()!r} ({len(query)} features):")
-for p in query: print(f"  {p.type.value:<10} center={p.center}")
+for p in query:
+    print(f"  {p.type.value:<10} center={p.center}")
 
 # ----- Generate multiple conformations of paracetamol -----
 print(f"Embedding {NUM_CONFS} conformers for paracetamol")

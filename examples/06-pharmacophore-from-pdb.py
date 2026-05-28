@@ -5,7 +5,7 @@
 from collections import Counter
 from pathlib import Path
 
-from pypharao import *
+from pypharao import PointType, query_pharmacophore_from_protein
 
 DATASETS = Path(__file__).resolve().parent / "datasets"
 PROTEIN_PDB = DATASETS / "4HFZ_pharmacophore.pdb"

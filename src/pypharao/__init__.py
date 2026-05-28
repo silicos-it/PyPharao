@@ -53,7 +53,7 @@ except ImportError:
     molecule_pharmacophore_from_molecule = None  # type: ignore[misc, assignment]
     query_pharmacophore_from_molecule = None  # type: ignore[misc, assignment]
 
-    def query_pharmacophore_from_protein(*args, **kwargs):  # type: ignore[no-redef]
+    def query_pharmacophore_from_protein(*_args, **_kwargs):  # type: ignore[no-redef]
         raise ImportError(
             "query_pharmacophore_from_protein requires RDKit (pip install rdkit)."
         )

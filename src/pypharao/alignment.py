@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .constants import GCI, GCI2, PI
-from .pharmacophore import Pharmacophore, PointType
+from .pharmacophore import TYPE_HAS_NORMAL, Pharmacophore, PharmacophorePoint, PointType
 from .quaternion_math import (
     inverse_hessian,
     normalize_quaternion,
@@ -75,9 +75,7 @@ def normal_contribution(
     d2Cdq2[1, 2] = d2Cdq2[2, 1] = 2.0 * (n1[0] * Uy + n1[1] * Ux)
     d2Cdq2[1, 3] = d2Cdq2[3, 1] = 2.0 * (n1[0] * Uz + n1[2] * Ux)
     d2Cdq2[2, 3] = d2Cdq2[3, 2] = 2.0 * (n1[1] * Uz + n1[2] * Uy)
-    dCdq = np.zeros(4, dtype=float)
-    for hi in range(4):
-        dCdq[hi] = sum(d2Cdq2[hi, hj] * q[hj] for hj in range(4))
+    dCdq = d2Cdq2 @ q
     c = n1[0] * Ux + n1[1] * Uy + n1[2] * Uz
     return c, dCdq, d2Cdq2
 
@@ -137,9 +135,23 @@ class Alignment:
         for ri, di in pairs:
             pr = ref[ri]
             pd = db[di]
-            p1p = np.array([pr.x - self._ref_center[0], pr.y - self._ref_center[1], pr.z - self._ref_center[2]])
+            p1p = np.array(
+                [
+                    pr.x - self._ref_center[0],
+                    pr.y - self._ref_center[1],
+                    pr.z - self._ref_center[2],
+                ],
+                dtype=float,
+            )
             p1n = np.array([pr.nx - pr.x, pr.ny - pr.y, pr.nz - pr.z], dtype=float)
-            p2p = np.array([pd.x - self._db_center[0], pd.y - self._db_center[1], pd.z - self._db_center[2]])
+            p2p = np.array(
+                [
+                    pd.x - self._db_center[0],
+                    pd.y - self._db_center[1],
+                    pd.z - self._db_center[2],
+                ],
+                dtype=float,
+            )
             p2n = np.array([pd.nx - pd.x, pd.ny - pd.y, pd.nz - pd.z], dtype=float)
 
             if pr.type != PointType.EXCL:
@@ -256,8 +268,8 @@ class Alignment:
             rotor = np.zeros(4, dtype=float)
             rotor[_call] = 1.0
             old_volume = -999.99
-            ii = 0
-            for ii in range(100):
+            iters = 0
+            for iters in range(100):  # noqa: B007 (last value of iters reported as iterations)
                 grad = np.zeros(4, dtype=float)
                 volume = 0.0
                 hessian = np.zeros((4, 4), dtype=float)
@@ -265,9 +277,8 @@ class Alignment:
                     Ak = self._aka[i]
                     Aq = Ak @ rotor
                     qAq = float(np.dot(Aq, rotor))
-                    v = GCI2 * (PI / (self._ref_map[i].sigma + self._db_map[i].sigma)) ** 1.5 * math.exp(
-                        -qAq
-                    )
+                    sig_sum = self._ref_map[i].sigma + self._db_map[i].sigma
+                    v = GCI2 * (PI / sig_sum) ** 1.5 * math.exp(-qAq)
                     c = 1.0
                     rf = self._ref_map[i].type
                     df = self._db_map[i].type
@@ -285,9 +296,9 @@ class Alignment:
                     ):
                         c, dCdq, d2Cdq2 = normal_contribution(n1, n2, rotor)
                         if c < 0:
-                            c *= -1.0
-                            dCdq = dCdq.copy() * -1.0
-                            d2Cdq2 = d2Cdq2.copy() * -1.0
+                            c = -c
+                            dCdq = -dCdq
+                            d2Cdq2 = -d2Cdq2
                         for hi in range(4):
                             grad[hi] += v * (dCdq[hi] - 2.0 * c * Aq[hi])
                             for hj in range(4):
@@ -340,15 +351,13 @@ class Alignment:
             if old_volume > si.volume:
                 si.rotor = rotor.copy()
                 si.volume = old_volume
-                si.iterations = ii
+                si.iterations = iters
 
         return si
 
 
 def position_pharmacophore(pharm: Pharmacophore, U: np.ndarray, sol: SolutionInfo) -> None:
     """Transform pharmacophore points in-place (utilities `positionPharmacophore`)."""
-    from .pharmacophore import PharmacophorePoint, TYPE_HAS_NORMAL
-
     rt = sol.rotation2.T
     for i in range(len(pharm)):
         p = pharm[i]

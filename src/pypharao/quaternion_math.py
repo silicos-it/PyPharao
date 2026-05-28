@@ -9,6 +9,15 @@ import numpy as np
 
 def normalize_quaternion(q: np.ndarray) -> None:
     d = float(np.dot(q, q))
+    # Guard against the (theoretically reachable) zero quaternion: fall back to
+    # the identity rotor so a degenerate gradient step cannot poison the rotor
+    # with NaNs.
+    if d < 1e-30:
+        q[0] = 1.0
+        q[1] = 0.0
+        q[2] = 0.0
+        q[3] = 0.0
+        return
     q /= math.sqrt(d)
 
 

@@ -156,7 +156,6 @@ def _sphere_points(center: tuple[float, float, float], radius: float) -> list[tu
 
 
 def _h_acc_neighbors(mol: Chem.Mol, conf_id: int, idx: int) -> list[int]:
-    a = mol.GetAtomWithIdx(idx)
     ax, ay, az = _pt(mol, conf_id, idx)
     out: list[int] = []
     for j in range(mol.GetNumAtoms()):
@@ -330,12 +329,12 @@ def _lipo_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
         cx = cy = cz = 0.0
         for aidx in ring:
             atom_set.discard(aidx)
-            l = weighted[aidx]
-            lipo_sum += l
+            lipo = weighted[aidx]
+            lipo_sum += lipo
             x, y, z = _pt(mol, conf_id, aidx)
-            cx += l * x
-            cy += l * y
-            cz += l * z
+            cx += lipo * x
+            cy += lipo * y
+            cz += lipo * z
         if lipo_sum > REF_LIPO:
             cx /= lipo_sum
             cy /= lipo_sum
@@ -359,12 +358,12 @@ def _lipo_points(mol: Chem.Mol, conf_id: int) -> list[PharmacophorePoint]:
                 if aa.GetAtomicNum() == 1:
                     continue
                 if aa.GetTotalNumHs() == 1:
-                    l = weighted[oi]
-                    lipo_sum += l
+                    lipo = weighted[oi]
+                    lipo_sum += lipo
                     x, y, z = _pt(mol, conf_id, oi)
-                    cx += l * x
-                    cy += l * y
-                    cz += l * z
+                    cx += lipo * x
+                    cy += lipo * y
+                    cz += lipo * z
             if lipo_sum > REF_LIPO:
                 cx /= lipo_sum
                 cy /= lipo_sum

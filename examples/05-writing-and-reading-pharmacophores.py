@@ -5,7 +5,7 @@ from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from pypharao import *
+from pypharao import QueryPharmacophore, query_pharmacophore_from_molecule
 
 # ------------------------------------------------------------
 # Build a query pharmacophore from a 3D structure of mol
@@ -17,7 +17,8 @@ AllChem.UFFOptimizeMolecule(mol)
 
 phore = query_pharmacophore_from_molecule(mol, name="phore")
 print(f"\nQuery {phore.get_name()!r} ({len(phore)} features):")
-for p in phore: print(f"  {p.type.value:<10} center={p.center}")
+for p in phore:
+    print(f"  {p.type.value:<10} center={p.center}")
 
 # -------------------------------------------------------------
 # Write the pharmacophore in different formats

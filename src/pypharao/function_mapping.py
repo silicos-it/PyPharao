@@ -93,22 +93,24 @@ class FunctionMapping:
             v1 = GCI * (PI / ref[self._ref_index[i]].sigma) ** 1.5
             v2 = GCI * (PI / db[self._db_index[i]].sigma) ** 1.5
             for j in range(i + 1, n):
-                if self._ref_index[i] == self._ref_index[j] or self._db_index[i] == self._db_index[j]:
+                same_ref = self._ref_index[i] == self._ref_index[j]
+                same_db = self._db_index[i] == self._db_index[j]
+                if same_ref or same_db:
                     continue
                 d1 = distance(ref[self._ref_index[i]], ref[self._ref_index[j]])
                 d2 = distance(db[self._db_index[i]], db[self._db_index[j]])
-                d1 = (d1 - d2) * (d1 - d2)
+                delta_sq = (d1 - d2) * (d1 - d2)
                 ra, rb = ref[self._ref_index[i]], db[self._db_index[i]]
                 rc, rd = ref[self._ref_index[j]], db[self._db_index[j]]
                 o1 = (
                     GCI2
                     * (PI / (ra.sigma + rb.sigma)) ** 1.5
-                    * math.exp(-(ra.sigma * rb.sigma) * d1 / (ra.sigma + rb.sigma))
+                    * math.exp(-(ra.sigma * rb.sigma) * delta_sq / (ra.sigma + rb.sigma))
                 )
                 o2 = (
                     GCI2
                     * (PI / (rc.sigma + rd.sigma)) ** 1.5
-                    * math.exp(-(rc.sigma * rd.sigma) * d1 / (rc.sigma + rd.sigma))
+                    * math.exp(-(rc.sigma * rd.sigma) * delta_sq / (rc.sigma + rd.sigma))
                 )
                 v3 = GCI * (PI / rc.sigma) ** 1.5
                 v4 = GCI * (PI / rd.sigma) ** 1.5
