@@ -30,7 +30,8 @@ Taminau, J.; Thijs, G.; De Winter, H. (2008) Pharao: Pharmacophore alignment and
   - [4.1 The PharmacophoreSearch class](#41-the-pharmacophoresearch-class)
   - [4.2 MatchResult, sorting, and hit I/O](#42-matchresult-sorting-and-hit-io)
 - [5. API summary](#5-api-summary)
-- [6. License](#6-license)
+- [6. Google Colab examples](#6-google-colab-examples)
+- [7. License](#7-license)
 
 
 
@@ -930,7 +931,18 @@ Condensed reference for exported names (see `pypharao.__init__`). For details an
 
 ---
 
-## 6. License
+## 6. Google Colab Examples
+
+The following Google Colab notebooks are useful to get a feeling about the PyPharao library:
+
+[![01 - Pharmacophores from molecules](https://colab.research.google.com/assets/colab-badge.svg)](https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb]
+
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb" target="_blank">01 - Pharmacophore from molecule</a> [Google Colab]
+
+
+---
+
+## 7. License
 
 LGPL-3.0-or-later (see `LICENSE`).
 
