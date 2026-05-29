@@ -942,6 +942,8 @@ The following Google Colab notebooks are useful to get a feeling about the PyPha
 
 - <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb" target="_blank">01 - Pharmacophore from molecule</a> [https://colab.research.google.com/assets/colab-badge.svg]
 
+
+- **01 — Pharmacophore from molecule** &nbsp; [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb)
 ---
 
 ## 7. License
