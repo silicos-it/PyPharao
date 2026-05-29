@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, TextIO
 
-from .pharmacophore import Pharmacophore, PointType
+from .pharmacophore import Pharmacophore, PharmacophorePoint, PointType
 from .search import MatchResult
+
+
+# Length (in angstrom) at which each normal-tip pseudo-atom is placed away
+# from the feature centre when rendering directional features as SDF / PDB.
+# Perception already stores aromatic normals at unit distance, so keeping this
+# at 1.0 A means the visual tip coincides with the perceived absolute tip.
+NORMAL_TIP_LENGTH: float = 1.0
 
 SortOrder = Literal["ascending", "descending"]
 SortKey = Literal[
@@ -210,6 +218,36 @@ def _pdb_atom_name(point_type: PointType, idx: int) -> str:
     return f"{code}{idx + 1:03d}"[:4]
 
 
+def _pdb_tip_atom_name(idx: int, side: str) -> str:
+    """4-character PDB atom name for a normal-tip pseudo-atom.
+
+    ``side`` must be ``"+"`` (above the plane) or ``"-"`` (below). The name is
+    ``"<side><001-indexed feature idx>"`` truncated to 4 chars (so up to 999
+    features are unambiguous; feature 1000+ would just collide with feature
+    100+, but this is a visualisation aid only).
+    """
+    if side not in ("+", "-"):
+        raise ValueError("side must be '+' or '-'")
+    return f"{side}{idx + 1:03d}"[:4]
+
+
+def _unit_normal_direction(
+    p: PharmacophorePoint,
+) -> tuple[float, float, float] | None:
+    """Unit vector from a point's centre to its absolute normal tip.
+
+    Returns ``None`` if the point has no normal or the stored normal is
+    degenerate (length below ``1e-9``).
+    """
+    if not p.has_normal:
+        return None
+    dx, dy, dz = p.nx - p.x, p.ny - p.y, p.nz - p.z
+    n = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if n < 1e-9:
+        return None
+    return (dx / n, dy / n, dz / n)
+
+
 def pharmacophore_to_mol(
     ph: Pharmacophore,
     *,
@@ -217,21 +255,33 @@ def pharmacophore_to_mol(
 ) -> Any:
     """Build a ``Chem.Mol`` representation of a pharmacophore.
 
-    Each pharmacophore point becomes a single, disconnected pseudo-atom whose
+    Each pharmacophore feature becomes one **centre** pseudo-atom whose
     element loosely encodes the feature type (AROM/LIPO → C, HDON → N,
     HACC → O, HACC_AND_HDON / HACC_OR_HDON → S, POSC → Na, NEGC → Cl,
-    EXCL → F, UNDEF → He). The atom carries PDB residue info so PDB output
+    EXCL → F, UNDEF → He). The centre carries PDB residue info so PDB output
     uses the type code as the residue name (e.g. ``ARO``, ``HDO``, ``HAC``)
     and SDF / mol-block writers preserve the 3D coordinates.
+
+    **Directional features** (currently ``AROM`` and ``AROM_OR_LIPO``, see
+    :data:`pypharao.pharmacophore.TYPE_HAS_NORMAL`) additionally emit **two
+    "tip" pseudo-atoms** (element ``H``), placed at
+    ``centre ± unit_normal * NORMAL_TIP_LENGTH`` (1 Å by default). Both
+    tips share the parent feature's PDB residue name and number, with atom
+    names ``"+001"`` / ``"-001"`` (one-indexed by feature). Each tip is bonded
+    to its centre by a single bond so 3D viewers render the plane normal as a
+    visible axis. The symmetric pair reflects the Pharao convention that the
+    aromatic cosine term uses ``|cos|`` — both ±n are equally valid normals.
 
     The molecule is **not** sanitised (these are pseudo-atoms with
     non-physical valences) but is fully usable with ``Chem.SDWriter``,
     ``Chem.MolToPDBBlock`` and the like. The return type is ``Chem.Mol``
     even though it's typed ``Any`` because RDKit is an optional dependency.
 
-    Per-feature SDF properties on the returned molecule:
+    Per-feature SDF properties on the returned molecule (one entry per
+    *feature*, independent of how many atoms each feature contributes):
 
-    - ``num_features`` (int)
+    - ``num_features`` (int) — number of pharmacophore features, **not**
+      number of atoms
     - ``types`` (comma-separated list of point types)
     - ``sigmas`` (comma-separated list of sigmas)
     - ``centers`` (semicolon-separated ``x,y,z`` triples)
@@ -250,19 +300,81 @@ def pharmacophore_to_mol(
 
     points = list(ph)
     rwmol = Chem.RWMol()
-    conf = Chem.Conformer(len(points))
-    for i, p in enumerate(points):
-        atom = Chem.Atom(_TYPE_TO_ELEMENT[p.type])
+
+    centre_idx_by_feature: dict[int, int] = {}
+    tip_idxs_by_feature: dict[int, list[int]] = {}
+    positions: list[tuple[float, float, float]] = []
+
+    def _add_pseudo_atom(
+        element: str,
+        pdb_name: str,
+        resname: str,
+        resnum: int,
+        position: tuple[float, float, float],
+    ) -> int:
+        atom = Chem.Atom(element)
         atom.SetNoImplicit(True)
         info = Chem.AtomPDBResidueInfo()
-        info.SetName(_pdb_atom_name(p.type, i))
-        info.SetResidueName(_TYPE_TO_PDB_RESNAME[p.type])
-        info.SetResidueNumber(i + 1)
+        info.SetName(pdb_name)
+        info.SetResidueName(resname)
+        info.SetResidueNumber(resnum)
         info.SetChainId("P")
         info.SetIsHeteroAtom(True)
         atom.SetMonomerInfo(info)
-        rwmol.AddAtom(atom)
-        conf.SetAtomPosition(i, (float(p.x), float(p.y), float(p.z)))
+        idx = rwmol.AddAtom(atom)
+        positions.append(position)
+        return idx
+
+    for i, p in enumerate(points):
+        resname = _TYPE_TO_PDB_RESNAME[p.type]
+        centre_pos = (float(p.x), float(p.y), float(p.z))
+        ci = _add_pseudo_atom(
+            element=_TYPE_TO_ELEMENT[p.type],
+            pdb_name=_pdb_atom_name(p.type, i),
+            resname=resname,
+            resnum=i + 1,
+            position=centre_pos,
+        )
+        centre_idx_by_feature[i] = ci
+
+        unit = _unit_normal_direction(p)
+        if unit is None:
+            continue
+        ux, uy, uz = unit
+        up_pos = (
+            centre_pos[0] + ux * NORMAL_TIP_LENGTH,
+            centre_pos[1] + uy * NORMAL_TIP_LENGTH,
+            centre_pos[2] + uz * NORMAL_TIP_LENGTH,
+        )
+        dn_pos = (
+            centre_pos[0] - ux * NORMAL_TIP_LENGTH,
+            centre_pos[1] - uy * NORMAL_TIP_LENGTH,
+            centre_pos[2] - uz * NORMAL_TIP_LENGTH,
+        )
+        ti_up = _add_pseudo_atom(
+            element="H",
+            pdb_name=_pdb_tip_atom_name(i, "+"),
+            resname=resname,
+            resnum=i + 1,
+            position=up_pos,
+        )
+        ti_dn = _add_pseudo_atom(
+            element="H",
+            pdb_name=_pdb_tip_atom_name(i, "-"),
+            resname=resname,
+            resnum=i + 1,
+            position=dn_pos,
+        )
+        tip_idxs_by_feature.setdefault(i, []).extend([ti_up, ti_dn])
+
+    for fi, tips in tip_idxs_by_feature.items():
+        ci = centre_idx_by_feature[fi]
+        for ti in tips:
+            rwmol.AddBond(ci, ti, Chem.BondType.SINGLE)
+
+    conf = Chem.Conformer(rwmol.GetNumAtoms())
+    for atom_idx, pos in enumerate(positions):
+        conf.SetAtomPosition(atom_idx, pos)
     rwmol.AddConformer(conf, assignId=True)
     mol = rwmol.GetMol()
 

@@ -220,6 +220,7 @@ class _ScreenConfig:
     perception: MoleculePharmacophorePerception
     epsilon: float
     use_direction: bool
+    score_with_direction: bool
     with_exclusion: bool
     early_exit_score: float
     excl_hard_filter: bool
@@ -333,6 +334,7 @@ def _worker(args: tuple[_ScreenConfig, int, Any]) -> list[tuple[int, MatchResult
         perception=config.perception,
         epsilon=config.epsilon,
         use_direction=config.use_direction,
+        score_with_direction=config.score_with_direction,
         with_exclusion=config.with_exclusion,
         early_exit_score=config.early_exit_score,
         excl_hard_filter=config.excl_hard_filter,
@@ -356,6 +358,22 @@ class PharmacophoreSearch:
     :class:`MoleculePharmacophore`. When ``None`` (the default) every molecule
     feature type is enabled.
 
+    Direction (normal) handling is split across two independent flags:
+
+    * ``use_direction`` (default ``True``) — apply the directional cosine
+      factor inside the **alignment** optimiser (``Alignment.align``). This
+      shapes the rotor/translation that maximises the Pharao volume objective
+      for aromatic-like and h-bond-like pairs (when both points carry a
+      normal).
+    * ``score_with_direction`` (default ``False``) — apply the same cosine
+      factor to the **final volume score** that produces
+      ``MatchResult.overlap_volume``, ``tanimoto`` and ``tversky_*``. By
+      default the score collapses to the pure Gaussian centre overlap (with
+      ``EXCL`` penalties), so the reported similarity reflects geometric
+      placement only. Set ``score_with_direction=True`` to recover the
+      original Pharao behaviour in which the cosine factor multiplies both
+      alignment and scoring.
+
     Excluded-volume handling has two layers:
 
     * **Soft Pharao penalty** (``with_exclusion``) — included in the alignment
@@ -378,6 +396,7 @@ class PharmacophoreSearch:
     perception: MoleculePharmacophorePerception | None = None
     epsilon: float = 0.5
     use_direction: bool = True
+    score_with_direction: bool = False
     with_exclusion: bool = True
     early_exit_score: float = 0.98
     excl_hard_filter: bool = True
@@ -402,8 +421,9 @@ class PharmacophoreSearch:
         min_matches: int,
     ) -> tuple[MatchResult, SolutionInfo]:
         use_dir = self.use_direction
-        ref_volume, excl_size = compute_ref_volume(query, use_dir)
-        db_volume = compute_db_volume(db, use_dir)
+        score_dir = self.score_with_direction
+        ref_volume, excl_size = compute_ref_volume(query, score_dir)
+        db_volume = compute_db_volume(db, score_dir)
         ref_size = len(query)
         db_size = len(db)
 
@@ -476,7 +496,7 @@ class PharmacophoreSearch:
             if query[i].type != PointType.EXCL:
                 continue
             for j in range(db_size):
-                excl_vol += volume_overlap(query[i], db_work[j], use_dir)
+                excl_vol += volume_overlap(query[i], db_work[j], score_dir)
 
         overlap_vol = 0.0
         matched = MoleculePharmacophore()
@@ -484,7 +504,7 @@ class PharmacophoreSearch:
             rp, dp = query[ri], db_work[di]
             if rp.type == PointType.EXCL or dp.type == PointType.EXCL:
                 continue
-            overlap_vol += volume_overlap(rp, dp, use_dir)
+            overlap_vol += volume_overlap(rp, dp, score_dir)
             normal = (dp.nx, dp.ny, dp.nz) if dp.has_normal else None
             matched.add_point(
                 PharmacophorePoint(
@@ -650,6 +670,7 @@ class PharmacophoreSearch:
             perception=self.perception,
             epsilon=self.epsilon,
             use_direction=self.use_direction,
+            score_with_direction=self.score_with_direction,
             with_exclusion=self.with_exclusion,
             early_exit_score=self.early_exit_score,
             excl_hard_filter=self.excl_hard_filter,

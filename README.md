@@ -263,9 +263,18 @@ There are rules that define which types from both a `QueryPharmacophore` and a `
 1. **Mapping**: a `functionMapping` walks candidate assignments of query features (all except `EXCL`) to molecule features that are 
     **type-compatible** and pass a pairwise **volume-overlap gate** controlled by `epsilon` on the searcher.
 2. **Alignment**: for promising maps, `alignment` finds a rigid transform that improves the **Gaussian volume overlap** between 
-    paired features (optionally using **direction vectors** for types with normals when `use_direction=True`).
-3. **Scoring**: the aligned overlap volume yields **Tanimoto**, **Tversky**, and related metrics; query `EXCL` points contribute 
+    paired features (using **direction vectors** for types with normals when `use_direction=True`, the default).
+3. **Scoring**: the aligned overlap volume yields **Tanimoto**, **Tversky**, and related metrics. By default the score is **direction-free** (pure Gaussian centre overlap); pass `score_with_direction=True` on `PharmacophoreSearch` to also fold the cosine factor into the score (the original Pharao behaviour). Query `EXCL` points contribute 
     a **soft overlap penalty** (`with_exclusion`) and optionally a **hard heavy-atom clash filter** after alignment (`excl_hard_filter`).
+
+
+**Where the normal is (and isn't) used:**
+
+- The **mapping** stage (`FunctionMapping`) uses only feature **types** and **inter-feature distances** — normals are ignored. Pairs are admitted purely on type compatibility plus the pairwise volume-overlap gate, so a missing or misoriented normal never prevents a candidate pose from being considered.
+- The **alignment** stage uses normals when `use_direction=True` (the default): directional features contribute a cosine factor to the objective (and its gradient and Hessian) that is optimised together with the Gaussian centre overlap. Set `use_direction=False` to drop the cosine from the alignment objective.
+- The **final volume score** (`volume_overlap` driving `overlap_volume`, `tanimoto`, `tversky_*`) is controlled by a **separate** flag, `score_with_direction` (default `False`). When `False` the score depends only on Gaussian centre overlap and `EXCL` penalties — so an aromatic ring that is well-aligned geometrically but with the plane normal flipped gets the same score as a perfectly-oriented match. Set `score_with_direction=True` to apply the cosine factor (`|cos|` for aromatic-like pairs — both ±n give the same score) and reproduce the original Pharao scoring.
+- Currently only `AROM` and `AROM_OR_LIPO` carry a normal in PyPharao's perception (`TYPE_HAS_NORMAL[t] == True`). The H-bond-direction code paths in `alignment.py` and `volume.py` are wired up but inactive — porting that perception step from Pharao C++ would be a separate change.
+- Because the aromatic cosine uses `|cos|`, SDF / PDB / `to_mol()` render each directional feature as a **centre atom plus two bonded tip atoms** placed symmetrically ±1 Å above and below the plane. The two tips share the parent feature's PDB residue and are bonded to the centre, so 3D viewers draw the plane normal as a visible axis. See [§3.5](#35-input-and-output) for the full atom-naming scheme. (`.phar` and JSON output write the normal as a single absolute tip `(nx, ny, nz)` — the file formats are unchanged.)
 
 
 ---
@@ -585,12 +594,14 @@ Import helpers are **classmethods** — they **return a new** `Pharmacophore`; a
 
 | Method                          | Returns / side effect                                                                                                              |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `to_mol(*, name=None)`          | `Chem.Mol` — one disconnected pseudo-atom per feature, 3D conformer at the feature centres; properties `kind`, `name`, `num_features`, `types`, `sigmas`, `centers`, `normals` |
+| `to_mol(*, name=None)`          | `Chem.Mol` — one **centre** pseudo-atom per feature (plus two bonded `H` tip atoms for directional features), 3D conformer at the feature centres; properties `kind`, `name`, `num_features`, `types`, `sigmas`, `centers`, `normals` |
 | `write_sdf(path, *, name=None)` | Single-record SDF; same per-feature properties as `to_mol()`                                                                       |
-| `write_pdb(path, *, name=None)` | PDB with one `HETATM` per feature; residue name encodes type (`ARO`, `LIP`, `HDO`, `HAC`, `DAC`, ...)                              |
+| `write_pdb(path, *, name=None)` | PDB with one `HETATM` per feature centre, plus two extra `HETATM`s per directional feature; residue name encodes type (`ARO`, `LIP`, `HDO`, `HAC`, `DAC`, ...)                              |
 
 
 `write_sdf` / `write_pdb` are thin wrappers around `to_mol`, so the layout matches the pharmacophore records written by `write_hits_sdf` / `write_hits_pdb` when you pass `pharmacophore=` (see [§4.2](#42-matchresult-sorting-and-hit-io)). The molecule is **not** sanitised (pseudo-atom valences are non-physical) but works with `Chem.SDWriter`, `Chem.MolToPDBBlock`, 3D viewers and the like. Use `name=` to override the title; the default is the pharmacophore's own `name` (query pharmacophores) or `"pharmacophore"`.
+
+Directional features (currently `AROM` / `AROM_OR_LIPO`) get two extra `H` "tip" pseudo-atoms placed ±1 Å along the unit normal and bonded to the centre. The tips share the parent feature's PDB residue, with atom names `+NNN` / `-NNN` (one-indexed by feature). This makes the plane normal visible as a bonded axis in PyMOL / Chimera / VMD without changing the per-feature property semantics — `num_features` continues to count features, not atoms.
 
 ```python
 q.write_json("out.json")
@@ -719,7 +730,8 @@ searcher = PharmacophoreSearch(query, perception=opts)   # custom molecule perce
 | `query`             | `QueryPharmacophore`                       | *(required)* | Raises `TypeError` if not a `QueryPharmacophore`.                                   |
 | `perception`        | `MoleculePharmacophorePerception` | `None` | `None`       | `None` ⇒ `MoleculePharmacophorePerception()` in `__post_init__`.                    |
 | `epsilon`           | `float`                                    | 0.5          | Tolerance for `FunctionMapping` when proposing candidate feature pairings.          |
-| `use_direction`     | `bool`                                     | `True`       | Use feature normals (e.g. `AROM` / `AROM_OR_LIPO`) in volume scoring and alignment. |
+| `use_direction`     | `bool`                                     | `True`       | Use feature normals (e.g. `AROM` / `AROM_OR_LIPO`) inside the **alignment** optimiser. |
+| `score_with_direction` | `bool`                                  | `False`      | Also apply the directional cosine factor to the **final volume score** (`overlap_volume`, `tanimoto`, `tversky_*`). Default `False` decouples scoring from alignment; set `True` to recover Pharao-faithful scoring. |
 | `with_exclusion`    | `bool`                                     | `True`       | Include `EXCL` in the soft penalty (`excl_volume`).                                 |
 | `early_exit_score`  | `float`                                    | 0.98         | Stop exploring further mappings when Tanimoto-like score exceeds this threshold.    |
 | `excl_hard_filter`  | `bool`                                     | `True`       | After alignment, reject conformers whose heavy atoms clash with `EXCL` markers.     |

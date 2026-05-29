@@ -25,6 +25,22 @@ def _embed(smiles: str, seed: int = 0xF00D) -> Chem.Mol:
     return mol
 
 
+def _centre_atoms(mol: Chem.Mol) -> list[Chem.Atom]:
+    """Filter out normal-tip pseudo-atoms from a pharmacophore Mol.
+
+    Normal-tip atoms (currently emitted for AROM / AROM_OR_LIPO features) use
+    PDB atom names that start with ``+`` or ``-``.
+    """
+    out: list[Chem.Atom] = []
+    for atom in mol.GetAtoms():
+        info = atom.GetMonomerInfo()
+        name = info.GetName().strip() if info is not None else ""
+        if name.startswith(("+", "-")):
+            continue
+        out.append(atom)
+    return out
+
+
 def test_print_match_results_single_hit(capsys):
     query = _embed("c1ccccc1O")
     ref = query_pharmacophore_from_molecule(query)
@@ -112,15 +128,16 @@ def test_pharmacophore_to_mol_round_trip():
     query = _embed("c1ccccc1O")
     ref = query_pharmacophore_from_molecule(query, name="phenol")
     mol = pharmacophore_to_mol(ref)
-    assert mol.GetNumAtoms() == len(ref)
+    centres = _centre_atoms(mol)
+    assert len(centres) == len(ref)
     assert mol.GetProp("kind") == "query"
     assert mol.GetProp("name") == "phenol"
     assert int(mol.GetProp("num_features")) == len(ref)
     types = mol.GetProp("types").split(",")
     assert types == [p.type.value for p in ref]
     conf = mol.GetConformer()
-    for i, p in enumerate(ref):
-        pos = conf.GetAtomPosition(i)
+    for atom, p in zip(centres, ref):
+        pos = conf.GetAtomPosition(atom.GetIdx())
         assert pos.x == pytest.approx(p.x)
         assert pos.y == pytest.approx(p.y)
         assert pos.z == pytest.approx(p.z)
@@ -143,7 +160,11 @@ def test_write_hits_sdf_with_pharmacophore_first(tmp_path: Path):
     assert first.HasProp("kind")
     assert first.GetProp("kind") == "query"
     assert first.GetProp("name") == "phenol"
-    assert first.GetNumAtoms() == len(ref)
+    assert int(first.GetProp("num_features")) == len(ref)
+    # SDF round-trip loses PDB monomer info, so we can't use _centre_atoms here;
+    # instead check the expected total atom count (centres + 2 tips per AROM).
+    n_arom = sum(1 for p in ref if p.has_normal)
+    assert first.GetNumAtoms() == len(ref) + 2 * n_arom
     second = records[1]
     assert second is not None
     assert second.HasProp("tanimoto")

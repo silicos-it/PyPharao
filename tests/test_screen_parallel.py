@@ -276,3 +276,39 @@ def test_add_excluded_volume_envelope_still_admits_reference_ligand():
     searcher = PharmacophoreSearch(query=query, use_direction=False)
     hits = searcher.screen(mol, progress=False, n_jobs=1)
     assert len(hits) == 1
+
+
+def test_score_with_direction_default_is_off():
+    """The cosine factor is applied to the alignment objective by default, but
+    NOT to the final Tanimoto score: ``score_with_direction`` defaults to
+    ``False``. A self-search must still produce a perfect Tanimoto because the
+    self-overlap cosine factor is 1.0 either way."""
+    query = _embed("c1ccccc1O", 0xF00D)
+    ref = query_pharmacophore_from_molecule(query)
+    searcher = PharmacophoreSearch(query=ref)
+    assert searcher.use_direction is True
+    assert searcher.score_with_direction is False
+    hits = searcher.screen(query, progress=False, n_jobs=1)
+    assert len(hits) == 1
+    assert hits[0][1].tanimoto == pytest.approx(1.0, abs=1e-3)
+
+
+def test_score_with_direction_true_does_not_exceed_default():
+    """Turning the cosine factor on in scoring (``score_with_direction=True``)
+    can only decrease or hold the Tanimoto, because ``|cos| <= 1``. This
+    sanity-checks the wiring: the flag must reach ``volume_overlap`` in the
+    final scoring loop, not just the alignment objective."""
+    query = _embed("c1ccccc1O", 0xF00D)
+    ref = query_pharmacophore_from_molecule(query)
+    mol = _embed("c1ccccc1O", 0xBEEF)
+
+    default = PharmacophoreSearch(query=ref, use_direction=True)
+    legacy = PharmacophoreSearch(
+        query=ref, use_direction=True, score_with_direction=True
+    )
+
+    h_default = default.screen(mol, progress=False, n_jobs=1)
+    h_legacy = legacy.screen(mol, progress=False, n_jobs=1)
+
+    assert h_default and h_legacy
+    assert h_legacy[0][1].tanimoto <= h_default[0][1].tanimoto + 1e-9

@@ -407,19 +407,28 @@ class Pharmacophore:
     def to_mol(self, *, name: str | None = None) -> Any:
         """Convert this pharmacophore to an RDKit ``Chem.Mol``.
 
-        Each pharmacophore feature becomes one disconnected pseudo-atom in a
+        Each pharmacophore feature becomes one **centre** pseudo-atom in a
         single 3D conformer placed at the feature centre. The element loosely
         encodes the feature type (AROM/LIPO → C, HDON → N, HACC → O,
         HACC_AND_HDON / HACC_OR_HDON → S, POSC → Na, NEGC → Cl, EXCL → F,
         UNDEF → He) and each atom carries PDB residue info so PDB output uses
         the type code as the residue name (e.g. ``ARO``, ``HDO``, ``HAC``).
 
+        **Directional features** (currently ``AROM`` / ``AROM_OR_LIPO``)
+        additionally emit two ``H`` "tip" pseudo-atoms placed symmetrically
+        ±1 Å along the unit normal, sharing the parent feature's PDB residue
+        and bonded to the centre. This makes the plane normal visible in 3D
+        viewers; the symmetric pair mirrors Pharao's ``|cos|`` convention for
+        aromatic features. See :func:`pypharao.pharmacophore_to_mol` for the
+        full atom-naming and bonding scheme.
+
         The molecule is **not** sanitised (these are pseudo-atoms with
         non-physical valences) but is fully usable with ``Chem.SDWriter``,
         ``Chem.MolToPDBBlock`` and 3D viewers. Per-feature properties are
-        attached so the molecule is self-describing:
+        attached so the molecule is self-describing (one entry per feature,
+        independent of how many atoms each feature contributes):
 
-        - ``num_features`` (int)
+        - ``num_features`` (int) — number of pharmacophore features
         - ``types`` (comma-separated list of point types)
         - ``sigmas`` (comma-separated list of sigmas)
         - ``centers`` (semicolon-separated ``x,y,z`` triples)
@@ -442,11 +451,18 @@ class Pharmacophore:
     def write_sdf(self, path: str | Path, *, name: str | None = None) -> None:
         """Write this pharmacophore to a single-record SDF file.
 
-        Each pharmacophore feature is rendered as one pseudo-atom via
-        :meth:`to_mol`. The SDF carries the same per-feature properties
-        (``types``, ``sigmas``, ``centers``, ``normals``, ``num_features``,
-        ``kind`` and, for named query pharmacophores, ``name``) so the file
-        is self-describing.
+        Each pharmacophore feature is rendered as one centre pseudo-atom via
+        :meth:`to_mol`; directional features (``AROM`` / ``AROM_OR_LIPO``)
+        additionally emit two bonded ``H`` tip atoms ±1 Å along the unit
+        normal so the plane axis is visible in 3D viewers. The SDF carries
+        the same per-feature properties (``types``, ``sigmas``, ``centers``,
+        ``normals``, ``num_features``, ``kind`` and, for named query
+        pharmacophores, ``name``) so the file is self-describing.
+
+        Note that V2000 SDF does not carry PDB monomer info, so tip atoms
+        survive the round-trip as bonded ``H`` atoms but lose their ``+`` /
+        ``-`` PDB names. Use the ``num_features`` property to recover the
+        feature count after re-reading.
 
         Pass ``name=`` to override the record title; the default is the
         pharmacophore's own ``name`` (for query pharmacophores) or
@@ -468,9 +484,16 @@ class Pharmacophore:
     def write_pdb(self, path: str | Path, *, name: str | None = None) -> None:
         """Write this pharmacophore to a PDB file.
 
-        Each pharmacophore feature becomes one ``HETATM`` whose residue
-        name encodes the feature type (``ARO``, ``LIP``, ``HDO``,
+        Each pharmacophore feature becomes one centre ``HETATM`` whose
+        residue name encodes the feature type (``ARO``, ``LIP``, ``HDO``,
         ``HAC``, ``DAC``, ...) — see :meth:`to_mol` for the full mapping.
+
+        Directional features (currently ``AROM`` / ``AROM_OR_LIPO``)
+        additionally emit two ``H`` ``HETATM`` records with atom names
+        ``+NNN`` / ``-NNN`` (one-indexed by feature), placed ±1 Å along the
+        unit normal and bonded to the centre via ``CONECT`` records. All
+        three atoms share the same residue, so PyMOL / Chimera / VMD group
+        them as one feature.
 
         Pass ``name=`` to override the ``COMPND`` title; the default is
         the pharmacophore's own ``name`` (for query pharmacophores) or
