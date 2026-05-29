@@ -938,6 +938,7 @@ The following Google Colab notebooks are useful to get a feeling about the PyPha
 
 - <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb" target="_blank">01 — Pharmacophore from molecule</a> [Google Colab]
 - <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/02-working-with-conformations.ipynb" target="_blank">02 — Working with conformations</a> [Google Colab]
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/03-excluded-volumes.ipynb" target="_blank">03 — Excluded volumes</a> [Google Colab]
 
 >  **Tip:** GitHub strips `target="_blank"` from README links, so badges open in the current tab. To open a notebook in a new tab, **middle-click** the link or hold **⌘** (macOS) / **Ctrl** (Linux/Windows) while clicking.
 
