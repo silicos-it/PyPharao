@@ -936,10 +936,8 @@ Condensed reference for exported names (see `pypharao.__init__`). For details an
 
 The following Google Colab notebooks are useful to get a feeling about the PyPharao library:
 
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb" target="_blank">01 — Pharmacophore from molecule</a> [Google Colab]
 
-- 01 — Pharmacophore from molecule &nbsp; [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb)
-
-- **01 — Pharmacophore from molecule** &nbsp; <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb" target="_blank" rel="noopener noreferrer"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
 ---
 
 ## 7. License
