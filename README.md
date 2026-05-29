@@ -936,9 +936,12 @@ Condensed reference for exported names (see `pypharao.__init__`). For details an
 
 The following Google Colab notebooks are useful to get a feeling about the PyPharao library:
 
-- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb" target="_blank">01 — Pharmacophore from molecule</a> [Google Colab]
-- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/02-working-with-conformations.ipynb" target="_blank">02 — Working with conformations</a> [Google Colab]
-- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/03-excluded-volumes.ipynb" target="_blank">03 — Excluded volumes</a> [Google Colab]
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb" target="_blank">01 — Pharmacophore from molecule</a> [opens in Google Colab]
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/02-working-with-conformations.ipynb" target="_blank">02 — Working with conformations</a> [opens in Google Colab]
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/03-excluded-volumes.ipynb" target="_blank">03 — Excluded volumes</a> [opens in Google Colab]
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/04-excluded-volumes-from-multiple-ligands.ipynb" target="_blank">04 — Excluded volumes from multiple ligands</a> [opens in Google Colab]
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/05-writing-and-reading-pharmacophores.ipynb" target="_blank">05 — Writing and reading pharmacophores</a> [opens in Google Colab]
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/06-pharmacophore-from-pdb.ipynb" target="_blank">06 — Pharmacophore from PDB</a> [opens in Google Colab]
 
 >  **Tip:** GitHub strips `target="_blank"` from README links, so badges open in the current tab. To open a notebook in a new tab, **middle-click** the link or hold **⌘** (macOS) / **Ctrl** (Linux/Windows) while clicking.
 
