@@ -404,14 +404,49 @@ class Pharmacophore:
         existing = getattr(self, "_name", "") or ""
         return existing or "pharmacophore"
 
+    def to_mol(self, *, name: str | None = None) -> Any:
+        """Convert this pharmacophore to an RDKit ``Chem.Mol``.
+
+        Each pharmacophore feature becomes one disconnected pseudo-atom in a
+        single 3D conformer placed at the feature centre. The element loosely
+        encodes the feature type (AROM/LIPO → C, HDON → N, HACC → O,
+        HACC_AND_HDON / HACC_OR_HDON → S, POSC → Na, NEGC → Cl, EXCL → F,
+        UNDEF → He) and each atom carries PDB residue info so PDB output uses
+        the type code as the residue name (e.g. ``ARO``, ``HDO``, ``HAC``).
+
+        The molecule is **not** sanitised (these are pseudo-atoms with
+        non-physical valences) but is fully usable with ``Chem.SDWriter``,
+        ``Chem.MolToPDBBlock`` and 3D viewers. Per-feature properties are
+        attached so the molecule is self-describing:
+
+        - ``num_features`` (int)
+        - ``types`` (comma-separated list of point types)
+        - ``sigmas`` (comma-separated list of sigmas)
+        - ``centers`` (semicolon-separated ``x,y,z`` triples)
+        - ``normals`` (semicolon-separated ``nx,ny,nz`` triples; ``-`` when absent)
+        - ``kind`` (``"query"`` or ``"molecule"``)
+        - ``name`` (only for named :class:`QueryPharmacophore` instances)
+
+        Pass ``name=`` to override the molecule title; the default is the
+        pharmacophore's own ``name`` (for query pharmacophores) or
+        ``"pharmacophore"``.
+
+        Returns the resulting ``Chem.Mol`` (typed ``Any`` because RDKit is an
+        optional dependency). Requires RDKit (raises ``ImportError``
+        otherwise).
+        """
+        from .match_report import pharmacophore_to_mol
+
+        return pharmacophore_to_mol(self, name=self._resolve_mol_name(name))
+
     def write_sdf(self, path: str | Path, *, name: str | None = None) -> None:
         """Write this pharmacophore to a single-record SDF file.
 
         Each pharmacophore feature is rendered as one pseudo-atom via
-        :func:`pypharao.pharmacophore_to_mol`. The SDF carries the same
-        per-feature properties (``types``, ``sigmas``, ``centers``,
-        ``normals``, ``num_features``, ``kind`` and, for named query
-        pharmacophores, ``name``) so the file is self-describing.
+        :meth:`to_mol`. The SDF carries the same per-feature properties
+        (``types``, ``sigmas``, ``centers``, ``normals``, ``num_features``,
+        ``kind`` and, for named query pharmacophores, ``name``) so the file
+        is self-describing.
 
         Pass ``name=`` to override the record title; the default is the
         pharmacophore's own ``name`` (for query pharmacophores) or
@@ -419,8 +454,6 @@ class Pharmacophore:
 
         Requires RDKit.
         """
-        from .match_report import pharmacophore_to_mol
-
         try:
             from rdkit import Chem
         except ImportError as exc:
@@ -428,7 +461,7 @@ class Pharmacophore:
                 "Pharmacophore.write_sdf requires RDKit (pip install rdkit)"
             ) from exc
 
-        mol = pharmacophore_to_mol(self, name=self._resolve_mol_name(name))
+        mol = self.to_mol(name=name)
         with Chem.SDWriter(str(Path(path))) as writer:
             writer.write(mol)
 
@@ -437,8 +470,7 @@ class Pharmacophore:
 
         Each pharmacophore feature becomes one ``HETATM`` whose residue
         name encodes the feature type (``ARO``, ``LIP``, ``HDO``,
-        ``HAC``, ``DAC``, ...) — see
-        :func:`pypharao.pharmacophore_to_mol` for the full mapping.
+        ``HAC``, ``DAC``, ...) — see :meth:`to_mol` for the full mapping.
 
         Pass ``name=`` to override the ``COMPND`` title; the default is
         the pharmacophore's own ``name`` (for query pharmacophores) or
@@ -446,8 +478,6 @@ class Pharmacophore:
 
         Requires RDKit.
         """
-        from .match_report import pharmacophore_to_mol
-
         try:
             from rdkit import Chem
         except ImportError as exc:
@@ -455,7 +485,7 @@ class Pharmacophore:
                 "Pharmacophore.write_pdb requires RDKit (pip install rdkit)"
             ) from exc
 
-        mol = pharmacophore_to_mol(self, name=self._resolve_mol_name(name))
+        mol = self.to_mol(name=name)
         Path(path).write_text(Chem.MolToPDBBlock(mol), encoding="utf-8")
 
     @classmethod

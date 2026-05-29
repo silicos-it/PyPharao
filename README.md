@@ -478,7 +478,7 @@ from pypharao import PharmacophorePoint, PointType, QueryPharmacophore
 
 q = QueryPharmacophore(name="demo")
 
-\# add_point — full PharmacophorePoint (AROM needs a plane normal as absolute tip coords)
+# add_point — full PharmacophorePoint (AROM needs a plane normal as absolute tip coords)
 q.add_point(
     PharmacophorePoint(
         type=PointType.AROM,
@@ -497,7 +497,7 @@ q.add_point(
 ```
 
 ```python
-\# update_point — tweak fields without building a replacement by hand
+# update_point — tweak fields without building a replacement by hand
 q.update_point(0, sigma=1.0)
 q.update_point(0, center=(10.1, 0.05, -0.02))
 
@@ -508,7 +508,7 @@ for i, p in enumerate(q):
 ```
 
 ```python
-\# set_point — replace slot i with another immutable point wholesale
+# set_point — replace slot i with another immutable point wholesale
 old = q[1]
 replacement = PharmacophorePoint(type=PointType.HACC, center=old.center, sigma=1.05)
 q.set_point(1, replacement)
@@ -579,20 +579,22 @@ q2 = q.copy()
 Import helpers are **classmethods** — they **return a new** `Pharmacophore`; always assign, e.g. `q = Pharmacophore.read_json(path)`.
 
 
-**SDF / PDB export)**
+**RDKit export (`Chem.Mol`, SDF, PDB)**
 
-| Method                          | Notes                                                                                                                              |
+| Method                          | Returns / side effect                                                                                                              |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `write_sdf(path, *, name=None)` | Single-record SDF; one pseudo-atom per feature; properties `kind`, `name`, `num_features`, `types`, `sigmas`, `centers`, `normals` |
-| `write_pdb(path, *, name=None)` | PDB with one `HETATM` per feature; residue encodes type                                                                            |
+| `to_mol(*, name=None)`          | `Chem.Mol` — one disconnected pseudo-atom per feature, 3D conformer at the feature centres; properties `kind`, `name`, `num_features`, `types`, `sigmas`, `centers`, `normals` |
+| `write_sdf(path, *, name=None)` | Single-record SDF; same per-feature properties as `to_mol()`                                                                       |
+| `write_pdb(path, *, name=None)` | PDB with one `HETATM` per feature; residue name encodes type (`ARO`, `LIP`, `HDO`, `HAC`, `DAC`, ...)                              |
 
 
-Both methods reuse `pharmacophore_to_mol`, so the layout matches the pharmacophore records written by `write_hits_sdf` / `write_hits_pdb` when you pass `pharmacophore=` (see [§4.2](#42-matchresult-sorting-and-hit-io)).
+`write_sdf` / `write_pdb` are thin wrappers around `to_mol`, so the layout matches the pharmacophore records written by `write_hits_sdf` / `write_hits_pdb` when you pass `pharmacophore=` (see [§4.2](#42-matchresult-sorting-and-hit-io)). The molecule is **not** sanitised (pseudo-atom valences are non-physical) but works with `Chem.SDWriter`, `Chem.MolToPDBBlock`, 3D viewers and the like. Use `name=` to override the title; the default is the pharmacophore's own `name` (query pharmacophores) or `"pharmacophore"`.
 
 ```python
 q.write_json("out.json")
 q.write_phar("out.phar")
-\# With RDKit:
+# With RDKit:
+mol = q.to_mol()                # in-memory Chem.Mol (e.g. for 3D viewers)
 q.write_sdf("query.sdf")
 q.write_pdb("query.pdb")
 ```
@@ -895,7 +897,8 @@ Condensed reference for exported names (see `pypharao.__init__`). For details an
 | `copy`                             | Shallow                           | `Pharmacophore`        |
 | `to_json_dict`, `to_json`, `write_json`, `from_json_dict`, `from_json`, `read_json`     | JSON I/O                   | `dict`/ `str` / new instance  |
 | `to_phar_text`, `write_phar`, `from_phar_text`, `read_phar`                | `.phar` I/O                        | `str` / new instance         |
-| `write_sdf`, `write_pdb`                   | RDKit export                               | `None`                     |
+| `to_mol(*, name=None)`                     | Build RDKit `Chem.Mol` (one pseudo-atom per feature) | `Chem.Mol`         |
+| `write_sdf`, `write_pdb`                   | RDKit export (thin wrappers over `to_mol`) | `None`                     |
 | `QueryPharmacophore`: `get_name`, `set_name`, `name`, `purge_exclusion_spheres(distance=8)` |           | `str` / `None` / `int`       |
 
 
@@ -1020,4 +1023,4 @@ These exist for maintainers; normal callers use `screen()` only:
 pharmacophore_to_mol(ph, *, name="pharmacophore")
 ```
 
-is also exported if you want to embed a pharmacophore in your own RDKit pipelines (returns `Chem.Mol` with one disconnected pseudo-atom per feature, plus per-mol SDF properties `kind`, `name`, `num_features`, `types`, `sigmas`, `centers`, `normals`).
+is also exported if you want to embed a pharmacophore in your own RDKit pipelines (returns `Chem.Mol` with one disconnected pseudo-atom per feature, plus per-mol SDF properties `kind`, `name`, `num_features`, `types`, `sigmas`, `centers`, `normals`). The equivalent method-style call `ph.to_mol(name=...)` is available on every `Pharmacophore` (see [§3.5](#35-input-and-output)).

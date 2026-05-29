@@ -85,3 +85,43 @@ def test_write_pdb_name_override(tmp_path: Path):
     text = path.read_text()
     assert "COMPND" in text
     assert "custom-title" in text
+
+
+def test_query_to_mol_returns_rdkit_mol_with_metadata():
+    q = _query_with_two_features()
+    mol = q.to_mol()
+    assert isinstance(mol, Chem.Mol)
+    assert mol.GetNumAtoms() == len(q)
+    assert mol.GetNumConformers() == 1
+    conf = mol.GetConformer()
+    for i, p in enumerate(q):
+        pos = conf.GetAtomPosition(i)
+        assert (pos.x, pos.y, pos.z) == pytest.approx((p.x, p.y, p.z))
+    assert mol.GetProp("_Name") == "phenol"
+    assert mol.GetProp("kind") == "query"
+    assert mol.GetProp("name") == "phenol"
+    assert mol.GetProp("types") == "AROM,HACC_AND_HDON"
+    assert int(mol.GetProp("num_features")) == 2
+
+
+def test_query_to_mol_name_override_and_default_title():
+    q_named = _query_with_two_features()
+    assert q_named.to_mol().GetProp("_Name") == "phenol"
+    assert q_named.to_mol(name="custom-title").GetProp("_Name") == "custom-title"
+
+    q_unnamed = QueryPharmacophore()
+    q_unnamed.add_point(PharmacophorePoint(type=PointType.HACC, center=(0.0, 0.0, 0.0)))
+    assert q_unnamed.to_mol().GetProp("_Name") == "pharmacophore"
+
+
+def test_molecule_pharmacophore_to_mol():
+    m = MoleculePharmacophore()
+    m.add_point(PharmacophorePoint(type=PointType.HACC, center=(1.0, 0.0, 0.0)))
+    m.add_point(PharmacophorePoint(type=PointType.HDON, center=(0.0, 1.0, 0.0)))
+    mol = m.to_mol()
+    assert isinstance(mol, Chem.Mol)
+    assert mol.GetNumAtoms() == 2
+    assert mol.GetProp("kind") == "molecule"
+    assert mol.GetProp("types") == "HACC,HDON"
+    assert not mol.HasProp("name")
+    assert mol.GetProp("_Name") == "pharmacophore"
