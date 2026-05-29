@@ -32,6 +32,7 @@ Taminau, J.; Thijs, G.; De Winter, H. (2008) Pharao: Pharmacophore alignment and
 - [5. API summary](#5-api-summary)
 - [6. Google Colab examples](#6-google-colab-examples)
 - [7. License](#7-license)
+- [8. Appendix](#8-appendix)
 
 
 
@@ -939,6 +940,7 @@ The following Google Colab notebooks are useful to get a feeling about the PyPha
 
 - <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb" target="_blank">01 - Pharmacophore from molecule</a> [Google Colab]
 
+- <a href="https://githubtocolab.com/silicos-it/PyPharao/blob/main/examples/google-colab/01-pharmacophore-from-molecule.ipynb" target="_blank">01 - Pharmacophore from molecule</a> [https://colab.research.google.com/assets/colab-badge.svg]
 
 ---
 
@@ -949,7 +951,7 @@ LGPL-3.0-or-later (see `LICENSE`).
 
 ---
 
-## Appendix — full `PharmacophorePoint` and `Pharmacophore` reference
+## 8. Appendix — full `PharmacophorePoint` and `Pharmacophore` reference
 
 The following tables collect the longer-form reference from earlier README versions; behavior is unchanged.
 
